@@ -1,0 +1,170 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - generic [ref=e237]:
+        - link [ref=e260] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e239]: Metron
+        - button [expanded] [ref=e261] [cursor=pointer]
+    - main [ref=e22]:
+      - region [ref=e262]:
+        - generic [ref=e24]:
+          - paragraph [ref=e25]: Pay-per-request API infrastructure
+          - heading [level=1] [ref=e263]: Turn API calls into paid work.
+          - paragraph [ref=e27]: Publish an endpoint, set a price, and let callers or agents pay per request on Celo.
+          - generic [ref=e28]:
+            - link [ref=e264] [cursor=pointer]:
+              - /url: /dashboard/endpoints/new
+              - text: Publish an API
+            - link [ref=e265] [cursor=pointer]:
+              - /url: "#demo"
+              - text: See a paid call
+          - link [ref=e266] [cursor=pointer]:
+            - /url: "#call-line"
+            - text: Follow the paid route
+        - figure [ref=e267]:
+          - generic [ref=e37]: The Paid Route makes each step of a machine request visible.
+      - region [ref=e269]:
+        - generic [ref=e39]:
+          - generic [ref=e40]:
+            - heading [level=2] [ref=e270]: One call. One price. One settlement.
+            - paragraph [ref=e42]: Payment terms, Celo settlement, API response and creator receipt are visible.
+          - list [ref=e43]:
+            - listitem [ref=e44]:
+              - generic [ref=e45]: Caller
+            - listitem [ref=e53]:
+              - generic [ref=e54]: Route
+            - listitem [ref=e63]:
+              - generic [ref=e64]: Price
+            - listitem [ref=e72]:
+              - generic [ref=e73]: Settled
+            - listitem [ref=e81]:
+              - generic [ref=e82]: Response
+      - region [ref=e271]:
+        - article [ref=e88]:
+          - paragraph [ref=e93]: For API creators
+          - heading [level=2] [ref=e272]: You built the API. Metron handles the payment layer.
+          - paragraph [ref=e95]: Publish an existing endpoint, set a price, and start accepting per-request payments without building keys, billing dashboards, subscriptions or payout infrastructure.
+          - link [ref=e273] [cursor=pointer]:
+            - /url: /dashboard/endpoints/new
+            - text: Publish an API
+        - article [ref=e97]:
+          - paragraph [ref=e102]: For AI-agent developers
+          - heading [level=2] [ref=e274]: Give your agents APIs they can actually pay for.
+          - paragraph [ref=e104]: Metron returns machine-readable payment requirements so an agent can authorise a small stablecoin payment, call the endpoint and continue its task.
+          - link [ref=e275] [cursor=pointer]:
+            - /url: "#demo"
+            - text: Run a paid call
+      - region [ref=e276]:
+        - generic [ref=e107]:
+          - generic [ref=e108]:
+            - paragraph [ref=e109]: Metron Receipt anatomy
+            - heading [level=2] [ref=e277]: Show the transaction. Then execute the work.
+            - paragraph [ref=e111]: Metron shows the route, price, network, settlement state and response instead of asking users to trust an invisible system.
+            - generic [ref=e112]:
+              - generic [ref=e113]:
+                - term [ref=e114]: Route
+                - definition [ref=e115]: The paid path used for the request.
+              - generic [ref=e116]:
+                - term [ref=e117]: Price
+                - definition [ref=e118]: The amount and asset shown before authorisation.
+              - generic [ref=e119]:
+                - term [ref=e120]: Network
+                - definition [ref=e121]: The settlement network for this call.
+              - generic [ref=e122]:
+                - term [ref=e123]: Status
+                - definition [ref=e124]: The payment verification state.
+              - generic [ref=e125]:
+                - term [ref=e126]: Response
+                - definition [ref=e127]: The upstream API response state.
+              - generic [ref=e128]:
+                - term [ref=e129]: Evidence
+                - definition [ref=e130]: Creator and transaction references when available.
+          - generic [ref=e131]:
+            - figure [ref=e278]:
+              - generic [ref=e133]:
+                - generic [ref=e134]: Metron Call
+                - generic [ref=e135]: / —
+              - generic [ref=e136]:
+                - generic [ref=e137]:
+                  - term [ref=e138]: Route
+                  - definition [ref=e139]: / —
+                - generic [ref=e140]:
+                  - term [ref=e141]: Price
+                  - definition [ref=e142]: / —
+                - generic [ref=e143]:
+                  - term [ref=e144]: Network
+                  - definition [ref=e145]: / Celo
+                - generic [ref=e146]:
+                  - term [ref=e147]: Status
+                  - definition [ref=e148]: / —
+                - generic [ref=e149]:
+                  - term [ref=e150]: Response
+                  - definition [ref=e151]: / —
+                - generic [ref=e152]:
+                  - term [ref=e153]: Creator
+                  - definition [ref=e154]: / —
+                - generic [ref=e155]:
+                  - term [ref=e156]: Tx
+                  - definition [ref=e157]: / —
+            - paragraph [ref=e158]: Route-specific values use em dashes because this is field anatomy, not a live call.
+      - region [ref=e279]:
+        - generic [ref=e161]:
+          - generic [ref=e168]:
+            - paragraph [ref=e169]: Celo + x402
+            - heading [level=2] [ref=e280]: Real work, paid for onchain.
+          - generic [ref=e171]:
+            - paragraph [ref=e172]: Metron routes useful API demand through Celo’s x402 payment infrastructure, turning machine-to-machine requests into measurable stablecoin activity.
+            - generic [ref=e173]:
+              - paragraph [ref=e178]: HTTP 402 payment requirements make the terms readable by software before the request continues.
+              - paragraph [ref=e183]: Payment is verified before the API request is forwarded.
+              - paragraph [ref=e187]: The creator receipt keeps the payment and response evidence inspectable.
+      - region [ref=e281]:
+        - generic [ref=e189]:
+          - generic [ref=e190]:
+            - generic [ref=e191]:
+              - paragraph [ref=e192]: Publish an endpoint
+              - heading [level=2] [ref=e282]: From endpoint to paid route.
+            - paragraph [ref=e194]: You built the capability. Metron handles the payment layer.
+          - list [ref=e195]:
+            - listitem [ref=e196]:
+              - generic [ref=e197]: "01"
+              - heading [level=3] [ref=e283]: Paste your endpoint
+              - paragraph [ref=e206]: Publish the existing capability you already built.
+            - listitem [ref=e207]:
+              - generic [ref=e208]: "02"
+              - heading [level=3] [ref=e284]: Set the price per request
+              - paragraph [ref=e214]: Choose the per-request policy callers will inspect.
+            - listitem [ref=e215]:
+              - generic [ref=e216]: "03"
+              - heading [level=3] [ref=e285]: Publish the paid route
+              - paragraph [ref=e223]: Receive a powered route for callers and agents.
+      - generic [ref=e225]:
+        - generic [ref=e226]:
+          - paragraph [ref=e227]: One call. One price. One settlement.
+          - heading [level=2] [ref=e286]: Publish your first API.
+          - paragraph [ref=e229]: Publish a paid API in minutes, then let callers and agents pay per request on Celo.
+        - link [ref=e287] [cursor=pointer]:
+          - /url: /dashboard/endpoints/new
+          - text: Publish an API
+    - contentinfo [ref=e233]:
+      - generic [ref=e234]:
+        - paragraph [ref=e235]: METRON
+        - paragraph [ref=e236]: The clear payment layer for API calls.
+  - alert [ref=e259]
+  - dialog [ref=e291]:
+    - generic [ref=e292]:
+      - heading "Metron" [level=2] [ref=e293]
+      - paragraph [ref=e304]: Navigate the Metron landing page.
+    - navigation "Mobile navigation" [ref=e305]:
+      - link "FOR CREATORS" [active] [ref=e306] [cursor=pointer]:
+        - /url: "#creators"
+      - link "FOR AGENTS" [ref=e308] [cursor=pointer]:
+        - /url: "#agents"
+      - link "HOW IT WORKS" [ref=e310] [cursor=pointer]:
+        - /url: "#how-it-works"
+      - link "VIEW DEMO" [ref=e312] [cursor=pointer]:
+        - /url: "#demo"
+      - link "PUBLISH AN API" [ref=e314] [cursor=pointer]:
+        - /url: /dashboard/endpoints/new
+    - button "Close" [ref=e315] [cursor=pointer]

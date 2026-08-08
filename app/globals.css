@@ -1,0 +1,185 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-cream: var(--metron-cream);
+  --color-ink: var(--metron-ink);
+  --color-lime: var(--metron-lime);
+  --color-lime-hover: var(--metron-lime-hover);
+  --color-coral: var(--metron-coral);
+  --color-clear-paper: var(--metron-white);
+  --color-muted-ink: var(--metron-muted-ink);
+  --color-blueprint: var(--metron-blueprint);
+  --color-route-sky: var(--metron-route-sky);
+  --color-transaction-gold: var(--metron-transaction-gold);
+  --color-hero-chartreuse: var(--metron-hero-chartreuse);
+  --color-settlement-green: var(--metron-settlement-green);
+  --color-review-bronze: var(--metron-review-bronze);
+  --color-failure-red: var(--metron-failure-red);
+  --color-mobile-yellow: var(--metron-mobile-yellow);
+  --color-mobile-magenta: var(--metron-mobile-magenta);
+  --color-mobile-purple: var(--metron-mobile-purple);
+  --color-mobile-surface: var(--metron-mobile-surface);
+  --color-folder-gray: var(--metron-folder-gray);
+  --color-folder-green: var(--metron-folder-green);
+  --color-folder-tan: var(--metron-folder-tan);
+  --color-folder-lime: var(--metron-folder-lime);
+
+  --font-sans: var(--font-inter);
+  --font-body: var(--font-inter);
+  --font-display: var(--font-poppins);
+  --font-heading: var(--font-poppins);
+  --font-metadata: var(--font-inter);
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  --radius-sm: calc(var(--radius-control) * 0.6);
+  --radius-md: calc(var(--radius-control) * 0.8);
+  --radius-lg: var(--radius-control);
+  --radius-xl: var(--radius-mobile-card);
+  --radius-2xl: var(--radius-card);
+  --radius-3xl: calc(var(--radius-card) * 1.25);
+  --radius-4xl: calc(var(--radius-card) * 1.5);
+  --radius-pill: 9999px;
+  --radius-card: 28px;
+  --radius-control: 14px;
+  --radius-mobile-card: 18px;
+
+  --spacing-metron-xs: 4px;
+  --spacing-metron-sm: 8px;
+  --spacing-metron-md: 16px;
+  --spacing-metron-lg: 24px;
+  --spacing-metron-xl: 32px;
+  --spacing-metron-2xl: 48px;
+  --spacing-metron-3xl: 64px;
+  --spacing-metron-hero: 96px;
+
+  --shadow-focus: var(--focus-ring);
+}
+
+:root {
+  --metron-cream: #faf7ea;
+  --metron-ink: #141414;
+  --metron-lime: #dce22b;
+  --metron-lime-hover: #e5eb55;
+  --metron-coral: #f4cbb9;
+  --metron-white: #ffffff;
+  --metron-muted-ink: #5c584d;
+  --metron-blueprint: #2f80ed;
+  --metron-route-sky: #5cace0;
+  --metron-transaction-gold: #e3a83a;
+  --metron-hero-chartreuse: #d6f24a;
+  --metron-settlement-green: #3b6b55;
+  --metron-review-bronze: #a46e2a;
+  --metron-failure-red: #b64a42;
+  --metron-mobile-yellow: #ffc629;
+  --metron-mobile-magenta: #f2367e;
+  --metron-mobile-purple: #7c5cfa;
+  --metron-mobile-surface: #faf6ef;
+  --metron-folder-gray: #b7b7b0;
+  --metron-folder-green: #4fbf5e;
+  --metron-folder-tan: #e3a83a;
+  --metron-folder-lime: #b6d94c;
+
+  --background: var(--metron-cream);
+  --foreground: var(--metron-ink);
+  --card: var(--metron-white);
+  --card-foreground: var(--metron-ink);
+  --popover: var(--metron-white);
+  --popover-foreground: var(--metron-ink);
+  --primary: var(--metron-lime);
+  --primary-foreground: var(--metron-ink);
+  --secondary: var(--metron-white);
+  --secondary-foreground: var(--metron-ink);
+  --muted: var(--metron-cream);
+  --muted-foreground: var(--metron-muted-ink);
+  --accent: var(--metron-coral);
+  --accent-foreground: var(--metron-ink);
+  --destructive: var(--metron-failure-red);
+  --border: rgba(20, 20, 20, 0.15);
+  --input: rgba(20, 20, 20, 0.15);
+  --ring: var(--metron-blueprint);
+  --chart-1: var(--metron-blueprint);
+  --chart-2: var(--metron-transaction-gold);
+  --chart-3: var(--metron-settlement-green);
+  --chart-4: var(--metron-coral);
+  --chart-5: var(--metron-lime);
+  --radius: var(--radius-control);
+  --sidebar: var(--metron-white);
+  --sidebar-foreground: var(--metron-ink);
+  --sidebar-primary: var(--metron-lime);
+  --sidebar-primary-foreground: var(--metron-ink);
+  --sidebar-accent: var(--metron-coral);
+  --sidebar-accent-foreground: var(--metron-ink);
+  --sidebar-border: rgba(20, 20, 20, 0.15);
+  --sidebar-ring: var(--metron-blueprint);
+  --focus-ring: 0 0 0 3px rgba(47, 128, 237, 0.22);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    @apply font-sans;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-inter), Inter, Arial, sans-serif;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  ::selection {
+    background: var(--metron-coral);
+    color: var(--metron-ink);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
