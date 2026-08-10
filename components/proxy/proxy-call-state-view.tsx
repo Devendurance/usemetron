@@ -75,7 +75,7 @@ const proxyPresentationStates: Record<ProxyPresentationState, StateDefinition> =
     label: "Response returned preview",
     title: "Response returned",
     description: "200 OK — response returned.",
-    detail: "Creator paid — receipt available. Presentation only; no upstream response, creator payment, or receipt evidence is shown here.",
+    detail: "Caller paid — receipt available. Presentation only; no upstream response, caller payment, or receipt evidence is shown here.",
     icon: CircleCheck,
     tone: "verified",
     badge: "Response preview",
@@ -207,7 +207,7 @@ function ProxyCallStateView({ routeReference, state }: ProxyCallStateViewProps) 
           network="Celo — presentation"
           status={definition.receiptStatus}
           response={definition.receiptResponse}
-          creator="Not available in preview"
+          caller="Not available in preview"
           transaction="Not available in preview"
           className="min-w-0 max-w-full border border-border"
         />

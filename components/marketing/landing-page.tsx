@@ -22,7 +22,7 @@ const receiptFields = [
   ["Network", "The settlement network for this call."],
   ["Status", "The payment verification state."],
   ["Response", "The upstream API response state."],
-  ["Evidence", "Creator and transaction references when available."],
+  ["Evidence", "Caller and transaction references when available."],
 ] as const
 
 const publishingSteps = [

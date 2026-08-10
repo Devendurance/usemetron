@@ -25,7 +25,8 @@ import { buildSettledDelivery } from "@/lib/gateway/delivery";
 import { markSettlementPendingAttempt } from "@/lib/db/settlement-recovery";
 import { extractPaymentIdentity, authorizationDeadline } from "@/lib/x402/payload";
 import { settlePayment } from "@/lib/x402/client";
-import { isSettlementEnabled } from "@/lib/env";
+import { isPayoutsEnabled, isSettlementEnabled } from "@/lib/env";
+import { payoutHandoff } from "@/lib/payouts/instance";
 
 type ProxyContext = { params: Promise<{ proxy: string[] }> };
 
@@ -338,6 +339,45 @@ async function handleResourceRequest(
           routeId: route.id,
         });
 
+        // ---- M10: exact-earning creator payout handoff (best effort) ----
+        // The payout outcome NEVER affects caller delivery: success,
+        // failure status, skip (disabled gate) and even a thrown handoff
+        // all produce the identical response below. Any throw is absorbed
+        // so a payout wiring problem can never break the delivered
+        // resource. Only safe fields are logged (no secrets, signatures,
+        // or error messages; the tx hash is only logged as a presence
+        // boolean — full hashes live in the payouts table).
+        try {
+          const payout = await payoutHandoff.attemptPayoutForReceipt(
+            route.developerId,
+            result.receiptId,
+            isPayoutsEnabled()
+          );
+          if (payout.kind === "skipped") {
+            stageLog("payout_attempt", {
+              requestId,
+              receiptId: result.receiptId,
+              kind: payout.kind,
+              reason: payout.reason,
+            });
+          } else {
+            stageLog("payout_attempt", {
+              requestId,
+              receiptId: result.receiptId,
+              kind: payout.kind,
+              status: payout.status,
+              payoutId: payout.payoutId,
+              txHashPresent: payout.txHash !== null ? 1 : 0,
+            });
+          }
+        } catch {
+          stageLog("payout_attempt", {
+            requestId,
+            receiptId: result.receiptId,
+            kind: "error",
+          });
+        }
+
         // Confirmed settlement → deliver the real protected upstream
         // response with the official PAYMENT-RESPONSE header.
         const delivery = buildSettledDelivery({
@@ -346,6 +386,7 @@ async function handleResourceRequest(
           safeResponseHeaders: execution.safeResponseHeaders,
           transaction: settlement.transaction,
           network: settlement.network,
+          receiptId: result.receiptId,
         });
         return new Response(delivery.body, {
           status: delivery.status,

@@ -1,10 +1,12 @@
 /**
- * Protected-resource delivery after CONFIRMED settlement (M6).
+ * Protected-resource delivery after CONFIRMED settlement (M6, M10).
  *
  * This function is only reachable from the `settled` branch of the
  * settlement pipeline, so PAYMENT-RESPONSE can never appear before a
  * confirmed settlement. Safe response headers are allowlisted here as a
  * second layer (the upstream service already filters at capture time).
+ * The settled response also carries X-METRON-RECEIPT-ID (M10) so the
+ * caller can reference the exact receipt that was paid and settled.
  */
 
 import { encodePaymentResponseHeader } from "@x402/core/http";
@@ -31,6 +33,7 @@ export function buildSettledDelivery(input: {
   safeResponseHeaders: Record<string, string>;
   transaction: string;
   network: string;
+  receiptId: string;
 }): SettledDelivery {
   const headers: Record<string, string> = {};
   for (const [name, value] of Object.entries(input.safeResponseHeaders)) {
@@ -44,6 +47,8 @@ export function buildSettledDelivery(input: {
     transaction: input.transaction,
     network: input.network as `${string}:${string}`,
   });
+  // M10: the settled receipt id lets callers reconcile what they paid.
+  headers["x-metron-receipt-id"] = input.receiptId;
   return {
     status: input.upstreamStatus,
     body: new Uint8Array(input.upstreamBody) as BodyInit,

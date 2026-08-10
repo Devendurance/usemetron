@@ -3,8 +3,6 @@ import { NextResponse } from "next/server";
 
 import { getSessionFromCookie } from "@/lib/auth/service";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/session";
-import { isPayoutsEnabled } from "@/lib/env";
-import { payoutService } from "@/lib/payouts/instance";
 import { payoutAccounting } from "@/lib/db/payouts";
 
 async function requireSession() {
@@ -13,37 +11,6 @@ async function requireSession() {
   const session = await getSessionFromCookie(token);
   if (!session.authenticated) return null;
   return session.developer;
-}
-
-export async function POST() {
-  const developer = await requireSession();
-  if (developer === null) {
-    return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
-  }
-
-  // Money gate: refuse BEFORE any signer/transaction work when disabled.
-  if (!isPayoutsEnabled()) {
-    return NextResponse.json(
-      { error: "PAYOUTS_DISABLED", message: "Payouts are currently disabled." },
-      { status: 403 }
-    );
-  }
-
-  try {
-    const outcome = await payoutService.requestPayout(developer.id);
-    if (outcome.status === "nothing_to_payout") {
-      return NextResponse.json(
-        { error: "NOTHING_TO_PAYOUT", message: "No outstanding earnings are available." },
-        { status: 400 }
-      );
-    }
-    return NextResponse.json({ payouts: outcome.payouts });
-  } catch {
-    return NextResponse.json(
-      { error: "INTERNAL_ERROR", message: "Payout request failed." },
-      { status: 500 }
-    );
-  }
 }
 
 export async function GET() {

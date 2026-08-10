@@ -76,6 +76,14 @@ describe("filterCallerHeaders", () => {
     expect(filtered["user-agent"]).toBe("metron-test");
   });
 
+  it("does not forward accept-encoding (the gateway forces identity upstream)", () => {
+    const filtered = filterCallerHeaders({
+      ...SAFE_HEADERS,
+      "accept-encoding": "gzip, br",
+    });
+    expect(filtered["accept-encoding"]).toBeUndefined();
+  });
+
   it("does not forward unknown headers (allowlist)", () => {
     const filtered = filterCallerHeaders({
       ...SAFE_HEADERS,

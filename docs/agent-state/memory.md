@@ -29,6 +29,25 @@ Durable engineering decisions and discovered lessons. Not task status.
 - Settlement/payout safety switches (`X402_SETTLEMENT_ENABLED`, `PAYOUTS_ENABLED`) stay false except during intentional manual tests, then return to false.
 - `METRON_SETTLEMENT_PRIVATE_KEY` is server-only, never in bundles/logs; the facilitator handles x402 settlement (the key is only for creator payouts).
 
+## M10 decisions (automatic exact-earning payout handoff)
+
+- The payout handoff is exact-earning: `reserveEarningForPayout` locks the SINGLE EARNING row of the receipt (FOR UPDATE, type=EARNING, developer-scoped) and inserts the payout. Any existing payout row for that earning — ANY status — makes the reserve return null and the handoff reports `already_handled`; at most one payout per earning, ever, no re-broadcast.
+- A FAILED payout WITHOUT a tx hash releases its reservation (accounting shows the amount available again), but the gateway will NOT auto-rebroadcast — the existing payout row blocks re-reserve. Recovery of such earnings is OPERATIONAL (reconcile/repair tooling), never automatic.
+- The payout outcome NEVER affects caller delivery: the settled branch absorbs every outcome (skipped, attempted, or a thrown handoff) and delivers the identical `PAYMENT-RESPONSE` + protected body. Only safe fields are logged; tx hashes are logged as a presence boolean, never in full.
+- The handoff gate is checked at the call site (route.ts, `isPayoutsEnabled()`); when disabled it short-circuits with zero dependency calls (`skipped/disabled`).
+- Settled responses carry the `X-METRON-RECEIPT-ID` header so callers can correlate a receipt without a dashboard session.
+- Manual withdraw is gone: POST /api/payouts was removed (GET remains as read-only payout history); the earnings overview has no Withdraw UI. Payouts happen only via the gateway handoff or operational recovery.
+- `tools/m10-external-client.mjs` (`npm run m10:client`) is isolated from Metron internals — no lib/, app/, DB, or Redis imports; only public @x402 packages + viem. Configured via `M10_BUYER_PRIVATE_KEY` (never printed) and `M10_METRON_URL`.
+
+## M10.1 decisions (response integrity)
+
+- Caller `accept-encoding` is removed from the forwarded-header allowlist and the gateway pins `accept-encoding: identity` upstream, so upstream compression is never negotiated for callers. Compressed replies are the gateway's problem, not the caller's.
+- A compressed upstream 2xx body (gzip/x-gzip/deflate/br) is decoded server-side with `maxOutputLength` capping the DECODED size at the same 5 MiB limit as the raw capture, plus a defensive post-check — compression bombs are bounded. Decode failure (unsupported/malformed/too large) → `UPSTREAM_RESPONSE_DECODE_FAILED`, body never delivered (fail closed).
+- An upstream that sends compressed bytes WITHOUT a `content-encoding` header is undetectable at the HTTP layer — the gateway has no way to know the bytes are compressed (trust boundary; out of scope by design).
+- After decode, `content-encoding` is removed and `content-length` is replaced with the decoded length so the caller sees an encoding-free, truthful body.
+- The delivered header set is exactly `DELIVERABLE_HEADERS` + `PAYMENT-RESPONSE` + `X-METRON-RECEIPT-ID`; hop-by-hop (content-encoding, content-length, transfer-encoding, connection) and cookie (set-cookie) headers never reach callers (regression-tested in `lib/gateway/delivery.test.ts`).
+- The receipt wallet row is labeled "Caller" (the buyer), never "Creator" — enforced by static guard tests over the receipt surfaces (metron-receipt, transaction detail/recent lists, proxy state view, dashboard anatomy copy).
+
 ## Discovered bugs & lessons
 
 1. **RainbowKit v2.2.11 "Preparing message..." stall** — the SIWE adapter's `getNonce` returned `""`; RainbowKit requires a TRUTHY nonce before it will call `createMessage` (its SignIn gate is `if (!address || !chainId || !nonce) return`). Fix: `getNonce` returns a constant `"metron"` gate value; the real server-owned nonce lives inside the challenge message. Also invalidate the auth query on verify success.
@@ -52,3 +71,7 @@ Durable engineering decisions and discovered lessons. Not task status.
 10. **Celo USDC uses the split-signature EIP-3009 selector** — `transferWithAuthorization(…,bytes32 nonce,uint8 v,bytes32 r,bytes32 s)` = `0xe3ee160e` (not the single-signature `0xeb46e437`); recovery decodes via the official `@x402/evm` `eip3009ABI`.
 
 11. **BigInt literals** — `tsconfig` targets ES2017; `0n`/`10n` literals fail typecheck. Use `BigInt(0)` etc.
+
+12. **Payout failure ≠ retryable by the gateway** — the exact-earning reserve blocks a second payout row for an already-attempted earning, so a FAILED payout (even one without a tx hash, where accounting releases the reservation) is never auto-rebroadcast by the gateway. Recover operationally — do not replay the caller's payment to force a retry.
+
+13. **Compressed upstream bodies silently corrupt delivered responses** — a caller forced to `identity` who receives raw gzip bytes with `content-encoding` stripped would get a body that lies (bytes ≠ resource, with no header left to decode them). Fix: the gateway never negotiates compression (`accept-encoding: identity` pinned; caller header removed from the allowlist), decodes any compressed 2xx reply server-side with a hard cap on the DECODED size (5 MiB), and fail-closes with `UPSTREAM_RESPONSE_DECODE_FAILED` when it cannot decode truthfully — undecodable/corrupt bytes are never delivered.

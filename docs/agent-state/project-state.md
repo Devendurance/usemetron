@@ -49,17 +49,21 @@ creator SIWE auth (RainbowKit + server SIWE + Redis nonce + opaque HttpOnly sess
 → Redis SET NX replay lock + Postgres UNIQUE payment_identifier
 → real facilitator POST /verify (same payload+requirements)
 → durable VERIFIED call_receipt
-→ runtime SSRF (DNS pinning) + real upstream execution (1 MiB in / 5 MiB out / 30s)
+→ runtime SSRF (DNS pinning) + real upstream execution (1 MiB in / 5 MiB out / 30s;
+  compression never negotiated — `accept-encoding: identity` pinned; any compressed
+  2xx body is decoded server-side with a bounded, fail-closed step)
 → upstream 2xx → durable SETTLEMENT_PENDING (before /settle) → /settle exactly once
 → SETTLED (+ tx hash) + exactly one creator EARNING (atomic transaction)
-→ PAYMENT-RESPONSE + protected upstream body delivered
-→ payout: reserve outstanding earnings (FOR UPDATE SKIP LOCKED) → crash-safe
-  broadcast of attributed USDC transfer → CONFIRMED payout
+→ M10 payout handoff (best effort, gated by PAYOUTS_ENABLED): reserve the EXACT
+  earning for this receipt (FOR UPDATE, one payout per earning — any existing row
+  blocks re-reserve) → crash-safe attributed USDC broadcast → CONFIRMED payout
+  (outcome NEVER affects caller delivery)
+→ PAYMENT-RESPONSE + protected upstream body delivered (X-METRON-RECEIPT-ID header)
 ```
 
 Safety switches (server-side env gates, both currently FALSE):
 - `X402_SETTLEMENT_ENABLED` — without `true`/`1`, settlement returns `501 SETTLEMENT_DISABLED` before any /settle call.
-- `PAYOUTS_ENABLED` — without `true`/`1`, POST /api/payouts returns `403 PAYOUTS_DISABLED` before any signer/transaction work.
+- `PAYOUTS_ENABLED` — without `true`/`1`, the gateway's automatic exact-earning payout handoff short-circuits (`skipped/disabled`) before any reserve/signer/transaction work. There is no manual payout endpoint (POST /api/payouts was removed in M10).
 
 ## Database (Supabase Postgres, drizzle)
 
@@ -67,7 +71,7 @@ Safety switches (server-side env gates, both currently FALSE):
 - `proxy_routes` — slug UNIQUE; `price_micro_usdc` bigint CHECK > 0; `encrypted_upstream_auth`; `is_active`.
 - `call_receipts` — `payment_identifier` UNIQUE; `x402_tx_hash` partial UNIQUE; money bigint; `facilitator_response` jsonb (settlement-attempt metadata for recovery).
 - `creator_ledger_entries` — `call_receipt_id` UNIQUE (one EARNING per SETTLED receipt).
-- `payouts` — `ledger_entry_id` UNIQUE (one payout per earning); `tx_hash` partial UNIQUE.
+- `payouts` — `ledger_entry_id` UNIQUE (one payout per earning); `tx_hash` partial UNIQUE. Any existing payout row (any status) blocks re-reserving the earning — the gateway never re-broadcasts.
 
 Payment status model: `VERIFIED` → `UPSTREAM_FAILED` | `SETTLEMENT_PENDING` (ambiguous outcome, fail-closed) | `SETTLEMENT_FAILED` | `SETTLED`.
 Payout status model: `PENDING` (reserved) → `SUBMITTED` (hash persisted) → `CONFIRMED`; `FAILED` (no-hash = released reservation; with-hash = reserved pending onchain reconciliation).
@@ -83,9 +87,10 @@ Migration: single canonical `drizzle/0000_loving_thundra.sql` (log already appli
 - SSRF: publication-time URL validation (localhost/private/link-local/metadata/IPv4-mapped IPv6 blocklists) AND runtime DNS-pinned connections (connect to validated public IP with `servername`+`Host`), redirects never followed.
 - Upstream credentials: AES-256-GCM encrypted at rest (Base64 32-byte key), decrypted server-side only after verification, never returned/logged.
 - Boundaries: caller body ≤ 1 MiB, upstream response ≤ 5 MiB, upstream timeout 30 s, header allowlist + deny list, creator auth injected after filtering.
+- Response integrity: `accept-encoding: identity` pinned upstream (caller `accept-encoding` removed from the forward allowlist); a compressed upstream reply (gzip/x-gzip/deflate/br) is decoded server-side with the same 5 MiB cap applied to the DECODED size (compression-bomb safe); undecodable bodies fail closed (`UPSTREAM_RESPONSE_DECODE_FAILED`) and are never delivered. The delivered header set is exactly `DELIVERABLE_HEADERS` + `PAYMENT-RESPONSE` + `X-METRON-RECEIPT-ID`; hop-by-hop and cookie headers never reach callers.
 - Replay: Postgres `payment_identifier` precheck (any prior state → 409 before /verify) + Redis SET NX + Postgres UNIQUE.
 - Settlement: durable PENDING before /settle; ambiguous outcomes stay SETTLED_PENDING; recovery requires strongly-bound onchain evidence (EIP-3009 AuthorizationUsed + same-tx canonical-USDC Transfer + calldata match), fail-closed.
-- Payouts: transactional reservation (FOR UPDATE SKIP LOCKED + UNIQUE), pre-broadcast hash checkpoint (never blind-resend), recovery repairs FAILED-with-hash against onchain truth.
+- Payouts: automatic exact-earning handoff in the gateway settled branch (gated by `PAYOUTS_ENABLED`; at most one payout per earning via FOR UPDATE + UNIQUE reserve; any existing row → skipped, never re-broadcast); pre-broadcast hash checkpoint (never blind-resend); recovery repairs FAILED-with-hash against onchain truth. FAILED-without-hash releases its reservation but is never auto-rebroadcast — recovery is operational.
 - Financial confirmation is separate from attribution verification (a proven transfer is CONFIRMED even if attribution decode fails; attribution reported as verified/unverified).
 
 ## Completed milestones
@@ -103,30 +108,36 @@ Migration: single canonical `drizzle/0000_loving_thundra.sql` (log already appli
 - **M7** — Creator ledger: one EARNING per SETTLED receipt (UNIQUE), reconciliation of pre-ledger settlements, `/api/earnings`, dashboard totals.
 - **M7.1** — Settlement persistence recovery: durable PENDING before /settle; onchain evidence-based pending resolution.
 - **M7.2** — Authoritative recovery proof: AuthorizationUsed + same-tx canonical USDC transfer + calldata binding; conflict → stays pending.
-- **M8** — Creator payouts: reservation, crash-safe attributed broadcast, confirmation evidence, payout recovery, `/api/payouts`, Withdraw UI, PAYOUTS_ENABLED switch.
+- **M8** — Creator payouts: reservation, crash-safe attributed broadcast, confirmation evidence, payout recovery, `PAYOUTS_ENABLED` switch (manual POST /api/payouts + Withdraw UI added here; both removed in M10).
 - **M8.1** — False-FAILED repair: financial confirmation now keyed to the canonical-USDC Transfer log (txTo null bug fixed); recovery scans FAILED-with-hash; real payout reconciled to CONFIRMED.
+- **M9** — Real dashboard + transaction evidence: receipts/payouts/transactions pages show real DB data with onchain evidence; `verify:m9` gate.
+- **M10** — Automatic exact-earning payout handoff in the gateway settled branch (gated by `PAYOUTS_ENABLED`; payout outcome never affects caller delivery; `X-METRON-RECEIPT-ID` on settled responses); manual withdraw removed (no POST /api/payouts, no Withdraw UI); standalone external client `tools/m10-external-client.mjs` (`npm run m10:client`); switches false, manual mainnet E2E evidence recorded below.
+- **M10.1** — Response integrity + evidence: compression never negotiated upstream (`accept-encoding: identity` pinned; caller header removed from the allowlist), bounded gzip/x-gzip/deflate/br decode with fail-safe (`UPSTREAM_RESPONSE_DECODE_FAILED`, 5 MiB decoded cap), receipt "Caller" label fix (static guard tests), external client decodes binary bodies charset-aware, delivery regression tests (`lib/gateway/delivery.test.ts`).
 
 ## Real Mainnet evidence (public)
 
 - First real x402 settlement tx: `0x8acaddf3c939eea0d104bb4ad3ab1ea2debc7698924dc77a540951d0cbb51b88`
 - First real creator payout tx: `0xdddacd2f2cdb50f56d1e1308e51607a3e52dc785d38a3295b70e3105256579e7`
+- M10 manual-E2E x402 settlement tx: `0x821dd6c12157f03aae18948c89a4c7046cd609eb136d52ddad64c57195b54a3a` (receipt SETTLED, upstream 200)
+- M10 manual-E2E creator payout tx: `0xa89d119600bfe366aeff364926546c626d6d04cbf08f347f4c13a4290b00a269` (payout CONFIRMED, attribution verified)
 - Buyer wallet: `0xEb2712aCB5650bbc6fFa4acd73BD85779796BCDC`
 - Creator wallet: `0xC44685b7c78cC9C9b7f6623d7697Ac30ab0D6Dc9`
 - Metron treasury/payTo: `0x21E5Fc03E4305CC8CFb874253c6d66A8bdB0bcDa`
 
 Financial proof (verified from Celo Mainnet evidence):
-- x402 call: 1000 micro-USDC (0.001 USDC) settled to the treasury.
-- Creator earning: 1000 micro-USDC.
-- Creator payout: 1000 micro-USDC (CONFIRMED, attribution verified).
-- Current creator accounting: earned 0.001 / paid 0.001 / outstanding 0 / available 0.
+- M9 x402 call: 1000 micro-USDC (0.001 USDC) settled to the treasury; creator earning 1000 micro-USDC; creator payout 1000 micro-USDC (CONFIRMED, attribution verified).
+- M10 manual-E2E x402 call: 1000 micro-USDC (0.001 USDC) settled to the treasury; creator earning 1000 micro-USDC; creator payout 1000 micro-USDC (CONFIRMED, attribution verified).
+- Current creator accounting: earned 0.002 / paid 0.002 / outstanding 0 / available 0.
 
 ## Current quality state (verified in the latest run)
 
-- Tests: **396 passing** (40 files)
+- Tests: **494 passing** (48 files)
 - Typecheck: **pass**
-- Lint: **pass** (0 errors, 0 warnings)
-- Build: **pass** (16 routes)
-- `npm run verify:foundation`: **pass** (exit 0)
-- `git diff --check`: **clean** (no whitespace issues remaining)
+- Lint: **pass** (0 errors; 1 pre-existing warning in `lib/payouts/broadcast.test.ts`, untouched by M10/M10.1)
+- Build: **pass** (22 routes)
+- `npm run verify:m9`: **pass** (real dashboard evidence matches the milestone)
+- `npm run verify:foundation`: **pass** (exit 0; external `api.x402.celo.org/health` returned HTTP 200 in this run)
+- `git diff --check`: **clean** (no whitespace issues)
+- `node --check tools/m10-external-client.mjs`: **pass**
 
 Switches: `X402_SETTLEMENT_ENABLED=false`, `PAYOUTS_ENABLED=false` (expected state).

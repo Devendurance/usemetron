@@ -7,7 +7,7 @@ type MetronReceiptProps = Omit<React.ComponentProps<"figure">, "children"> & {
   network?: React.ReactNode
   status?: React.ReactNode
   response?: React.ReactNode
-  creator?: React.ReactNode
+  caller?: React.ReactNode
   transaction?: React.ReactNode
 }
 
@@ -23,7 +23,7 @@ function MetronReceipt({
   network,
   status,
   response,
-  creator,
+  caller,
   transaction,
   ...props
 }: MetronReceiptProps) {
@@ -33,7 +33,7 @@ function MetronReceipt({
     ["Network", network],
     ["Status", status],
     ["Response", response],
-    ["Creator", creator],
+    ["Caller", caller],
     ["Tx", transaction],
   ] as const
 

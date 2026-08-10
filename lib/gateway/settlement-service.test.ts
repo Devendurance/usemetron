@@ -150,6 +150,7 @@ describe("settled delivery", () => {
     },
     transaction: "0xabc123def456",
     network: "eip155:42220",
+    receiptId: "rcpt_abc123",
   };
 
   it("returns the exact bounded upstream body with the upstream status", () => {
@@ -174,6 +175,7 @@ describe("settled delivery", () => {
     expect(decoded.success).toBe(true);
     expect(decoded.transaction).toBe("0xabc123def456");
     expect(decoded.network).toBe("eip155:42220");
+    expect(delivery.headers["x-metron-receipt-id"]).toBe("rcpt_abc123");
   });
 });
 

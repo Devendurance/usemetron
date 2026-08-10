@@ -43,7 +43,6 @@ const DENY_HEADERS = new Set([
 const ALLOW_HEADERS = new Set([
   "accept",
   "accept-language",
-  "accept-encoding",
   "content-type",
   "user-agent",
   "cache-control",

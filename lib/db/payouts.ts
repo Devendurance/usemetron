@@ -132,6 +132,80 @@ export async function reserveOutstandingEarnings(
   });
 }
 
+export type ReserveEarningInput = {
+  developerId: string;
+  fromWallet: string;
+  toWallet: string;
+  attributionTag: string;
+  ledgerEntryId: string;
+  now: Date;
+};
+
+/**
+ * Reserves exactly ONE EARNING as a PENDING payout (never sweeps).
+ * Inside a transaction: the single ledger row is locked FOR UPDATE (no
+ * SKIP LOCKED — the caller targets a specific row) and verified as an
+ * EARNING owned by the developer. Any existing payout for the entry
+ * (any status) short-circuits to null; a FAILED record is recovered
+ * operationally, never re-broadcast here. The UNIQUE ledger_entry_id
+ * constraint is the concurrency guard: a racing insert conflicts and is
+ * swallowed (onConflictDoNothing → empty returning → null).
+ */
+export async function reserveEarningForPayout(
+  input: ReserveEarningInput
+): Promise<PayoutRow | null> {
+  return db.transaction(async (tx) => {
+    // Lock the single EARNING row for this ledger entry. An unknown id,
+    // foreign entry, or non-EARNING row matches nothing → null.
+    const [earning] = await tx
+      .select({
+        id: creatorLedgerEntries.id,
+        callReceiptId: creatorLedgerEntries.call_receipt_id,
+        amountMicroUsdc: creatorLedgerEntries.amount_micro_usdc,
+      })
+      .from(creatorLedgerEntries)
+      .where(
+        and(
+          eq(creatorLedgerEntries.id, input.ledgerEntryId),
+          eq(creatorLedgerEntries.developer_id, input.developerId),
+          eq(creatorLedgerEntries.type, "EARNING")
+        )
+      )
+      .for("update");
+
+    if (!earning) return null;
+
+    // At most one payout per earning — any existing row means this
+    // earning is already spoken for.
+    const existing = await tx
+      .select({ ledgerEntryId: payouts.ledger_entry_id })
+      .from(payouts)
+      .where(eq(payouts.ledger_entry_id, earning.id));
+    if (existing.length > 0) return null;
+
+    const rows = await tx
+      .insert(payouts)
+      .values({
+        developer_id: input.developerId,
+        call_receipt_id: earning.callReceiptId,
+        ledger_entry_id: earning.id,
+        from_wallet: input.fromWallet,
+        to_wallet: input.toWallet,
+        amount_micro_usdc: earning.amountMicroUsdc,
+        status: PAYOUT_STATUS.PENDING,
+        attribution_tag: input.attributionTag,
+        attempt_count: 0,
+        created_at: input.now,
+        updated_at: input.now,
+      })
+      .onConflictDoNothing({ target: payouts.ledger_entry_id })
+      .returning();
+
+    const row = rows[0];
+    return row ? mapRow(row) : null;
+  });
+}
+
 export async function listPayoutsByDeveloper(
   developerId: string
 ): Promise<PayoutRow[]> {

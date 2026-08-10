@@ -31,7 +31,7 @@ export default function DashboardPage() {
 
       <section className="mt-8 grid gap-4 md:grid-cols-3">
         <ConsoleCard title="Route evidence" description="The Call Line shows the required payment sequence." icon={Route}><p className="text-sm leading-relaxed text-muted-ink">Caller, route, price, settlement, and response remain visible in each connected call.</p></ConsoleCard>
-        <ConsoleCard title="Receipt anatomy" description="A receipt preserves clear fields rather than invented activity." icon={CircleDollarSign}><p className="text-sm leading-relaxed text-muted-ink">Route, price, network, status, response, creator, and transaction evidence come from the persisted call record.</p></ConsoleCard>
+        <ConsoleCard title="Receipt anatomy" description="A receipt preserves clear fields rather than invented activity." icon={CircleDollarSign}><p className="text-sm leading-relaxed text-muted-ink">Route, price, network, status, response, caller, and transaction evidence come from the persisted call record.</p></ConsoleCard>
         <ConsoleCard title="Status legend" description="Status color is reserved for transaction meaning."><div className="flex flex-wrap gap-2"><StatusBadge variant="verified">Verified</StatusBadge><StatusBadge variant="review">Review</StatusBadge><StatusBadge variant="failed">Failed</StatusBadge></div></ConsoleCard>
       </section>
     </div>

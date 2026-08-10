@@ -91,6 +91,43 @@ export async function createEarningForReceipt(
   return entry ? { kind: "created", entry: mapEntry(entry) } : { kind: "already_exists" };
 }
 
+export type EarningForReceipt = {
+  id: string;
+  callReceiptId: string;
+  amountMicroUsdc: number;
+};
+
+/**
+ * The ledger entry for one settled receipt (exact-earning payout read).
+ * Ownership-scoped and EARNING-only; UNIQUE call_receipt_id makes
+ * limit(1) exact — a foreign receipt resolves to null, never to another
+ * creator's entry.
+ */
+export async function getEarningByReceipt(
+  developerId: string,
+  receiptId: string
+): Promise<EarningForReceipt | null> {
+  const rows = await db
+    .select({
+      id: creatorLedgerEntries.id,
+      callReceiptId: creatorLedgerEntries.call_receipt_id,
+      amountMicroUsdc: creatorLedgerEntries.amount_micro_usdc,
+    })
+    .from(creatorLedgerEntries)
+    .where(
+      and(
+        eq(creatorLedgerEntries.developer_id, developerId),
+        eq(creatorLedgerEntries.call_receipt_id, receiptId),
+        eq(creatorLedgerEntries.type, LEDGER_TYPE.EARNING)
+      )
+    )
+    .limit(1);
+  const row = rows[0];
+  return row
+    ? { id: row.id, callReceiptId: row.callReceiptId, amountMicroUsdc: row.amountMicroUsdc }
+    : null;
+}
+
 /** SETTLED receipts that have no ledger entry yet (reconciliation input). */
 export async function listSettledReceiptsMissingEarnings(): Promise<SettledReceiptRow[]> {
   const rows = await db

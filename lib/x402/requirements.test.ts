@@ -79,6 +79,17 @@ describe("buildPaymentRequired", () => {
     expect(required.accepts[0]?.amount).toBe("5000");
   });
 
+  it("carries payTo = METRON_SETTLEMENT_WALLET through the full PaymentRequired payload", () => {
+    // The /verify+ and /settle requirement payloads are built from
+    // buildPaymentRequirements, so the payTo invariant must hold here.
+    const required = buildPaymentRequired({
+      priceMicroUsdc: 5000,
+      resourceUrl: "http://localhost:3000/p/abc123/translate?q=en",
+    });
+    expect(required.accepts[0]?.payTo).toBe(METRON_SETTLEMENT_WALLET);
+    expect(required.accepts[0]?.payTo).toBe("0x21E5Fc03E4305CC8CFb874253c6d66A8bdB0bcDa");
+  });
+
   it("carries the requested resource URL (path + query preserved)", () => {
     const required = buildPaymentRequired({
       priceMicroUsdc: 1000,

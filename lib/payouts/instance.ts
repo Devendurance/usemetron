@@ -19,10 +19,13 @@ import {
   listNonFinalPayouts,
   markPayoutFailed,
   markPayoutSubmitted,
+  reserveEarningForPayout,
   reserveOutstandingEarnings,
 } from "../db/payouts";
+import { getEarningByReceipt } from "../db/ledger";
 import { METRON_ATTRIBUTION_TAG, METRON_SETTLEMENT_WALLET, USDC_ADDRESS } from "../celo/config";
 import { broadcastPayout, type PayoutBroadcastDeps } from "./broadcast";
+import { attemptPayoutForReceipt, type PayoutHandoffResult } from "./handoff";
 import { reconcilePayouts, type PayoutReceiptEvidence } from "./reconcile";
 import { requestPayout, type PayoutRequestOutcome } from "./service";
 
@@ -169,6 +172,7 @@ function buildBroadcastDeps(): PayoutBroadcastDeps {
 const globalForPayouts = globalThis as unknown as {
   metronPayoutRequest?: (developerId: string) => Promise<PayoutRequestOutcome>;
   metronPayoutRecovery?: () => ReturnType<typeof reconcilePayouts>;
+  metronPayoutHandoff?: (developerId: string, receiptId: string, enabled: boolean) => Promise<PayoutHandoffResult>;
 };
 
 /** Shared payout request service (hot-reload safe). */
@@ -197,3 +201,29 @@ export const payoutRecovery: () => ReturnType<typeof reconcilePayouts> =
       markFailed: markPayoutFailed,
       now: () => new Date(),
     }));
+
+/**
+ * Exact-earning payout handoff for one receipt (hot-reload safe).
+ * Wired to the exact-earning reserve (never sweeps) and the crash-safe
+ * broadcast pipeline. The recipient wallet is derived server-side; the
+ * payout leg pays from the registered Metron wallet.
+ */
+export const payoutHandoff: {
+  attemptPayoutForReceipt(developerId: string, receiptId: string, enabled: boolean): Promise<PayoutHandoffResult>;
+} = {
+  attemptPayoutForReceipt:
+    globalForPayouts.metronPayoutHandoff ??
+    (globalForPayouts.metronPayoutHandoff = (developerId, receiptId, enabled) =>
+      attemptPayoutForReceipt(
+        { developerId, receiptId, enabled },
+        {
+          fromWallet: METRON_SETTLEMENT_WALLET,
+          attributionTag: METRON_ATTRIBUTION_TAG,
+          developerWallet: getDeveloperWallet,
+          getEarningByReceipt,
+          reserveEarning: reserveEarningForPayout,
+          broadcast: (payout) => broadcastPayout(payout, buildBroadcastDeps()),
+          now: () => new Date(),
+        }
+      )),
+};

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { brotliCompressSync, deflateSync, gzipSync } from "node:zlib";
 
 import { encryptUpstreamSecret, loadUpstreamEncryptionKey } from "../crypto/upstream-secrets";
 import {
@@ -58,10 +59,14 @@ function makeService(
   return { service, transport, resolveAddresses };
 }
 
-function okTransport(status: number, body: Buffer) {
+function okTransport(
+  status: number,
+  body: Buffer,
+  headers: Record<string, string> = {}
+) {
   return async (): Promise<UpstreamTransportResult> => ({
     ok: true,
-    response: { status, headers: { "content-type": "application/json" }, body },
+    response: { status, headers: { "content-type": "application/json", ...headers }, body },
   });
 }
 
@@ -289,5 +294,162 @@ describe("upstream service — execution results", () => {
     const { service } = makeService();
     const result = await service.executeUpstream(baseInput);
     expect(result.kind).toBe("success");
+  });
+});
+
+describe("upstream service — content-encoding negotiation + decode (M10.1)", () => {
+  const DECODED_JSON = Buffer.from('{"translated":"bonjour"}');
+
+  it("requests identity encoding from the upstream", async () => {
+    const { service, transport } = makeService();
+    await service.executeUpstream(baseInput);
+    const args = (transport as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[];
+    const params = args[0] as { headers: Record<string, string> };
+    expect(params.headers["accept-encoding"]).toBe("identity");
+  });
+
+  it("a caller-supplied accept-encoding is never forwarded to the upstream", async () => {
+    const { service, transport } = makeService();
+    await service.executeUpstream({
+      ...baseInput,
+      callerHeaders: [...SAFE_CALLER_HEADERS, ["accept-encoding", "gzip, br"]],
+    });
+    const args = (transport as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[];
+    const params = args[0] as { headers: Record<string, string> };
+    expect(params.headers["accept-encoding"]).toBe("identity");
+  });
+
+  it("decodes a gzip upstream body to the exact decoded bytes with safe headers intact", async () => {
+    const compressed = gzipSync(DECODED_JSON);
+    const { service } = makeService({
+      transport: vi.fn(
+        okTransport(200, compressed, {
+          "content-encoding": "gzip",
+          "content-length": String(compressed.length),
+          etag: '"abc123"',
+          "last-modified": "Wed, 01 Jan 2025 00:00:00 GMT",
+        })
+      ),
+    });
+    const result = await service.executeUpstream(baseInput);
+    expect(result.kind).toBe("success");
+    if (result.kind === "success") {
+      expect(result.responseBody.equals(DECODED_JSON)).toBe(true);
+      expect(result.safeResponseHeaders["content-type"]).toBe("application/json");
+      expect(result.safeResponseHeaders.etag).toBe('"abc123"');
+      expect(result.safeResponseHeaders["last-modified"]).toBe(
+        "Wed, 01 Jan 2025 00:00:00 GMT"
+      );
+      expect(result.safeResponseHeaders["content-encoding"]).toBeUndefined();
+      expect(result.safeResponseHeaders["content-length"]).toBeUndefined();
+    }
+  });
+
+  it.each([
+    ["br", brotliCompressSync(DECODED_JSON)],
+    ["deflate", deflateSync(DECODED_JSON)],
+  ] as const)(
+    "decodes a %s upstream body to the exact decoded bytes",
+    async (encoding, compressed) => {
+      const { service } = makeService({
+        transport: vi.fn(okTransport(200, compressed, { "content-encoding": encoding })),
+      });
+      const result = await service.executeUpstream(baseInput);
+      expect(result.kind).toBe("success");
+      if (result.kind === "success") {
+        expect(result.responseBody.equals(DECODED_JSON)).toBe(true);
+        expect(result.safeResponseHeaders["content-type"]).toBe("application/json");
+        expect(result.safeResponseHeaders["content-encoding"]).toBeUndefined();
+      }
+    }
+  );
+
+  it("decodes a gzip body when the transport reports a mixed-case Content-Encoding header", async () => {
+    // A transport/injection returning `Content-Encoding` (mixed case) must
+    // not defeat M10.1: a case-sensitive lookup would pass the raw gzip
+    // bytes through undecoded — the exact corruption class M10.1 closes.
+    const compressed = gzipSync(DECODED_JSON);
+    const { service } = makeService({
+      transport: vi.fn(
+        okTransport(200, compressed, {
+          "Content-Encoding": "gzip",
+          "content-length": String(compressed.length),
+        })
+      ),
+    });
+    const result = await service.executeUpstream(baseInput);
+    expect(result.kind).toBe("success");
+    if (result.kind === "success") {
+      expect(result.responseBody.equals(DECODED_JSON)).toBe(true);
+      expect(result.safeResponseHeaders["content-encoding"]).toBeUndefined();
+    }
+  });
+
+  it("passes an identity-encoded body through untouched", async () => {
+    const { service } = makeService({
+      transport: vi.fn(
+        okTransport(200, DECODED_JSON, { "content-encoding": "identity" })
+      ),
+    });
+    const result = await service.executeUpstream(baseInput);
+    expect(result.kind).toBe("success");
+    if (result.kind === "success") {
+      expect(result.responseBody.equals(DECODED_JSON)).toBe(true);
+    }
+  });
+
+  it("passes a body with no content-encoding through untouched", async () => {
+    const { service } = makeService();
+    const result = await service.executeUpstream(baseInput);
+    expect(result.kind).toBe("success");
+    if (result.kind === "success") {
+      expect(result.responseBody.equals(Buffer.from("{}"))).toBe(true);
+    }
+  });
+
+  it("malformed gzip fails closed with UPSTREAM_RESPONSE_DECODE_FAILED and the upstream status", async () => {
+    const { service } = makeService({
+      transport: vi.fn(
+        okTransport(200, Buffer.from("this is not gzip at all"), {
+          "content-encoding": "gzip",
+        })
+      ),
+    });
+    const result = await service.executeUpstream(baseInput);
+    expect(result).toMatchObject({
+      kind: "failed",
+      errorCode: UPSTREAM_ERROR_CODES.RESPONSE_DECODE_FAILED,
+      status: 200,
+    });
+  });
+
+  it("unsupported content-encoding fails closed with UPSTREAM_RESPONSE_DECODE_FAILED", async () => {
+    const { service } = makeService({
+      transport: vi.fn(
+        okTransport(200, Buffer.from("raw zstd bytes"), { "content-encoding": "zstd" })
+      ),
+    });
+    const result = await service.executeUpstream(baseInput);
+    expect(result).toMatchObject({
+      kind: "failed",
+      errorCode: UPSTREAM_ERROR_CODES.RESPONSE_DECODE_FAILED,
+      status: 200,
+    });
+  });
+
+  it("decoded payload over the cap fails closed with UPSTREAM_RESPONSE_DECODE_FAILED", async () => {
+    // 64 KiB of repeated bytes compresses far below the 1 KiB raw cap, but
+    // decodes far above it — a classic compressed bomb.
+    const bomb = Buffer.alloc(64 * 1024, 0x61);
+    const { service } = makeService({
+      transport: vi.fn(okTransport(200, gzipSync(bomb), { "content-encoding": "gzip" })),
+      maxResponseBytes: 1024,
+    });
+    const result = await service.executeUpstream(baseInput);
+    expect(result).toMatchObject({
+      kind: "failed",
+      errorCode: UPSTREAM_ERROR_CODES.RESPONSE_DECODE_FAILED,
+      status: 200,
+    });
   });
 });

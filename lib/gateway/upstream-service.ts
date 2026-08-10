@@ -26,6 +26,10 @@ import {
   type UpstreamErrorCode,
 } from "./limits";
 import {
+  decodeResponseBody,
+  normalizeResponseHeadersAfterDecode,
+} from "./content-encoding";
+import {
   pinnedUpstreamTransport,
   type UpstreamTransport,
   type UpstreamTransportResponse,
@@ -181,6 +185,10 @@ export function createUpstreamService(deps: UpstreamServiceDeps = {}) {
     const headers: UpstreamHeaders = {
       ...filtered,
       ...auth,
+      // M10.1: never negotiate upstream compression — callers cannot supply
+      // `accept-encoding` (removed from the allowlist), so pin identity
+      // explicitly. The gateway decodes any compressed reply itself.
+      "accept-encoding": "identity",
       host: hostname,
     };
 
@@ -218,8 +226,52 @@ export function createUpstreamService(deps: UpstreamServiceDeps = {}) {
         latencyMs,
       };
     }
-    const safeResponseHeaders: Record<string, string> = {};
+
+    // M10.1: decode compressed 2xx bodies before capture. The transport
+    // caps the RAW bytes; `maxResponseBytes` (same value) caps the DECODED
+    // payload, so a small compressed body cannot decompress unboundedly.
+    // Fail closed — a body we cannot decode truthfully is never delivered.
+    // Read `content-encoding` case-insensitively: node:http lowercases
+    // header keys, but an injected/transport response may carry a
+    // mixed-case key (e.g. "Content-Encoding") — a case-sensitive lookup
+    // would miss it and pass compressed bytes through with no header left
+    // to decode them with.
+    let rawEncoding: string | string[] | undefined;
     for (const [name, value] of Object.entries(response.headers)) {
+      if (name.toLowerCase() === "content-encoding") {
+        rawEncoding = value;
+        break;
+      }
+    }
+    const contentEncoding = Array.isArray(rawEncoding)
+      ? rawEncoding.join(", ")
+      : rawEncoding;
+    let responseBody = response.body;
+    let responseHeaders = response.headers;
+    if (
+      contentEncoding !== undefined &&
+      contentEncoding !== null &&
+      contentEncoding !== "" &&
+      contentEncoding !== "identity"
+    ) {
+      const decoded = decodeResponseBody(response.body, contentEncoding, maxResponseBytes);
+      if (!decoded.ok) {
+        return {
+          kind: "failed",
+          errorCode: UPSTREAM_ERROR_CODES.RESPONSE_DECODE_FAILED,
+          status: response.status,
+          latencyMs,
+        };
+      }
+      responseBody = decoded.body;
+      responseHeaders = normalizeResponseHeadersAfterDecode(
+        response.headers,
+        decoded.body.byteLength
+      );
+    }
+
+    const safeResponseHeaders: Record<string, string> = {};
+    for (const [name, value] of Object.entries(responseHeaders)) {
       if (SAFE_UPSTREAM_RESPONSE_HEADERS.has(name.toLowerCase())) {
         if (typeof value === "string") safeResponseHeaders[name.toLowerCase()] = value;
       }
@@ -228,7 +280,7 @@ export function createUpstreamService(deps: UpstreamServiceDeps = {}) {
       kind: "success",
       status: response.status,
       latencyMs,
-      responseBody: response.body,
+      responseBody,
       safeResponseHeaders,
     };
   }

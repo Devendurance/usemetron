@@ -225,7 +225,7 @@ function TransactionDetail({ id }: { id: string }) {
         network="Celo"
         status={transaction.paymentStatus}
         response={transaction.upstreamStatusCode !== null ? `${transaction.upstreamStatusCode}` : "—"}
-        creator={transaction.callerWallet !== null ? shortTx(transaction.callerWallet) : "—"}
+        caller={transaction.callerWallet !== null ? shortTx(transaction.callerWallet) : "—"}
         transaction={receiptTransaction}
       />
 

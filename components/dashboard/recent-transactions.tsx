@@ -162,7 +162,7 @@ function LatestCallEvidence() {
             network="Celo"
             status={data.transactions[0].paymentStatus}
             response={data.transactions[0].upstreamStatusCode !== null ? `${data.transactions[0].upstreamStatusCode}` : undefined}
-            creator={data.transactions[0].callerWallet !== null ? shortTx(data.transactions[0].callerWallet) : undefined}
+            caller={data.transactions[0].callerWallet !== null ? shortTx(data.transactions[0].callerWallet) : undefined}
             transaction={
               data.transactions[0].x402TxHash !== null ? (
                 data.transactions[0].explorerUrl !== null ? (
