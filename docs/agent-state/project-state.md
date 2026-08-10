@@ -89,6 +89,9 @@ Migration: single canonical `drizzle/0000_loving_thundra.sql` (log already appli
 - Boundaries: caller body ≤ 1 MiB, upstream response ≤ 5 MiB, upstream timeout 30 s, header allowlist + deny list, creator auth injected after filtering.
 - Response integrity: `accept-encoding: identity` pinned upstream (caller `accept-encoding` removed from the forward allowlist); a compressed upstream reply (gzip/x-gzip/deflate/br) is decoded server-side with the same 5 MiB cap applied to the DECODED size (compression-bomb safe); undecodable bodies fail closed (`UPSTREAM_RESPONSE_DECODE_FAILED`) and are never delivered. The delivered header set is exactly `DELIVERABLE_HEADERS` + `PAYMENT-RESPONSE` + `X-METRON-RECEIPT-ID`; hop-by-hop and cookie headers never reach callers.
 - Replay: Postgres `payment_identifier` precheck (any prior state → 409 before /verify) + Redis SET NX + Postgres UNIQUE.
+- Rate limiting (M11): three surfaces — auth-challenge 20/60s, gateway-anonymous 60/60s (both per client IP), gateway-signed 30/60s (per payment identifier, IP fallback). 429 = JSON `{"error":"RATE_LIMITED","retryAfterSeconds":N}` + `retry-after`. Redis counters with bounded TTL; fail-open (`degraded`) on Redis errors — a paid flow is never strangled by a limiter outage. `X-Forwarded-For` is trusted ONLY when `RATE_LIMIT_TRUST_PROXY_HEADER=true` (opt-in; default untrusted).
+- Safe logging (M11): all PRD §23 stages through `lib/observability/logger.ts` — JSON lines, injected secret env values never serialized, values under sensitive keys redacted, URL credentials scrubbed.
+- Env fail-fast (M11): `lib/env.ts` presence+format validation and `lib/env/canonical.ts` canonical Celo Mainnet constant checks — production refuses to boot on missing/invalid/canonical-mismatched config (names only, never values).
 - Settlement: durable PENDING before /settle; ambiguous outcomes stay SETTLED_PENDING; recovery requires strongly-bound onchain evidence (EIP-3009 AuthorizationUsed + same-tx canonical-USDC Transfer + calldata match), fail-closed.
 - Payouts: automatic exact-earning handoff in the gateway settled branch (gated by `PAYOUTS_ENABLED`; at most one payout per earning via FOR UPDATE + UNIQUE reserve; any existing row → skipped, never re-broadcast); pre-broadcast hash checkpoint (never blind-resend); recovery repairs FAILED-with-hash against onchain truth. FAILED-without-hash releases its reservation but is never auto-rebroadcast — recovery is operational.
 - Financial confirmation is separate from attribution verification (a proven transfer is CONFIRMED even if attribution decode fails; attribution reported as verified/unverified).
@@ -113,6 +116,7 @@ Migration: single canonical `drizzle/0000_loving_thundra.sql` (log already appli
 - **M9** — Real dashboard + transaction evidence: receipts/payouts/transactions pages show real DB data with onchain evidence; `verify:m9` gate.
 - **M10** — Automatic exact-earning payout handoff in the gateway settled branch (gated by `PAYOUTS_ENABLED`; payout outcome never affects caller delivery; `X-METRON-RECEIPT-ID` on settled responses); manual withdraw removed (no POST /api/payouts, no Withdraw UI); standalone external client `tools/m10-external-client.mjs` (`npm run m10:client`); switches false, manual mainnet E2E evidence recorded below.
 - **M10.1** — Response integrity + evidence: compression never negotiated upstream (`accept-encoding: identity` pinned; caller header removed from the allowlist), bounded gzip/x-gzip/deflate/br decode with fail-safe (`UPSTREAM_RESPONSE_DECODE_FAILED`, 5 MiB decoded cap), receipt "Caller" label fix (static guard tests), external client decodes binary bodies charset-aware, delivery regression tests (`lib/gateway/delivery.test.ts`).
+- **M11** — Production hardening: rate limiting on all three surfaces (20/60 auth-challenge, 60/60 gateway-anonymous, 30/60 gateway-signed; 429 + `retry-after`; bounded TTL; fail-open degraded; opt-in XFF trust via `RATE_LIMIT_TRUST_PROXY_HEADER`), safe logger with secret redaction (all PRD §23 stages), env fail-fast + canonical constants check, SSRF blocklist extensions (CGNAT/benchmarking/multicast/reserved/IPv6 doc ranges + DNS tests), payout wallet lock (Redis, fail-open), and the full acceptance matrix + operator recovery + rate-limit config documented in `docs/production-readiness.md`.
 
 ## Real Mainnet evidence (public)
 
@@ -129,15 +133,16 @@ Financial proof (verified from Celo Mainnet evidence):
 - M10 manual-E2E x402 call: 1000 micro-USDC (0.001 USDC) settled to the treasury; creator earning 1000 micro-USDC; creator payout 1000 micro-USDC (CONFIRMED, attribution verified).
 - Current creator accounting: earned 0.002 / paid 0.002 / outstanding 0 / available 0.
 
-## Current quality state (verified in the latest run)
+## Current quality state (verified in the latest M11 run)
 
-- Tests: **494 passing** (48 files)
+- Tests: **576 passing** (55 files)
 - Typecheck: **pass**
-- Lint: **pass** (0 errors; 1 pre-existing warning in `lib/payouts/broadcast.test.ts`, untouched by M10/M10.1)
+- Lint: **pass** (0 errors; 1 pre-existing warning in `lib/payouts/broadcast.test.ts`, untouched by M11)
 - Build: **pass** (22 routes)
 - `npm run verify:m9`: **pass** (real dashboard evidence matches the milestone)
 - `npm run verify:foundation`: **pass** (exit 0; external `api.x402.celo.org/health` returned HTTP 200 in this run)
 - `git diff --check`: **clean** (no whitespace issues)
 - `node --check tools/m10-external-client.mjs`: **pass**
+- Read-only real-evidence re-check (M11 Task 5 scratch): M10 settlement `0x821dd6…` SETTLED/upstream 200, payout `0xa89d1196…` CONFIRMED/attributed, earned = paid = 0.002 USDC, outstanding 0, reserved rows 0, switches false — all confirmed, no money moved.
 
 Switches: `X402_SETTLEMENT_ENABLED=false`, `PAYOUTS_ENABLED=false` (expected state).

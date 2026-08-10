@@ -178,3 +178,44 @@ describe("isBlockedHostname", () => {
     expect(isBlockedHostname("localhost.attack.com")).toBe(false);
   });
 });
+
+describe("validateUpstreamUrl — full blocklist range table (M11)", () => {
+  it("blocks CGNAT 100.64.0.0/10 and allows the first address outside it", async () => {
+    for (const ip of ["100.64.0.1", "100.127.255.255"]) {
+      const result = await validateUpstreamUrl(`https://${ip}`, { rejectHttp: true });
+      expect(result.ok, `should reject ${ip}`).toBe(false);
+    }
+    const outside = await validateUpstreamUrl("https://100.128.0.1", { rejectHttp: true });
+    expect(outside.ok).toBe(true);
+  });
+
+  it("blocks benchmarking 198.18.0.0/15 and allows the first address outside it", async () => {
+    for (const ip of ["198.18.0.1", "198.19.255.255"]) {
+      const result = await validateUpstreamUrl(`https://${ip}`, { rejectHttp: true });
+      expect(result.ok, `should reject ${ip}`).toBe(false);
+    }
+    const outside = await validateUpstreamUrl("https://198.20.0.1", { rejectHttp: true });
+    expect(outside.ok).toBe(true);
+  });
+
+  it("blocks multicast 224.0.0.0/4", async () => {
+    for (const ip of ["224.0.0.1", "239.255.255.255"]) {
+      const result = await validateUpstreamUrl(`https://${ip}`, { rejectHttp: true });
+      expect(result.ok, `should reject ${ip}`).toBe(false);
+    }
+  });
+
+  it("blocks reserved 240.0.0.0/4 (incl. the 255.255.255.255 broadcast)", async () => {
+    for (const ip of ["240.0.0.1", "255.255.255.255"]) {
+      const result = await validateUpstreamUrl(`https://${ip}`, { rejectHttp: true });
+      expect(result.ok, `should reject ${ip}`).toBe(false);
+    }
+  });
+
+  it("blocks IPv6 multicast ff00::/8 and documentation 2001:db8::/32", async () => {
+    for (const ip of ["ff00::1", "ff01::1", "2001:db8::1"]) {
+      const result = await validateUpstreamUrl(`https://[${ip}]`, { rejectHttp: true });
+      expect(result.ok, `should reject ${ip}`).toBe(false);
+    }
+  });
+});

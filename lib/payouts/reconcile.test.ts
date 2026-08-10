@@ -86,6 +86,40 @@ describe("reconcilePayouts", () => {
     expect(report.keptReserved[0]).toMatchObject({ reason: "never_broadcast" });
   });
 
+  it("never acts on a FAILED payout without a persisted hash — no fetch, no finalize, no re-mark", async () => {
+    // FAILED-without-hash is the pre-broadcast failure case (reservation
+    // released at the accounting layer). Recovery must check the hash
+    // BEFORE any action: with no hash there is nothing to inspect onchain
+    // and nothing to finalize or re-fail — and never a blind resend.
+    const { deps, fetchReceipt, finalize, markFailed } = makeDeps({
+      rows: [makeRow({ status: "FAILED", txHash: null, lastError: "insufficient_usdc_balance" })],
+    });
+    const report = await reconcilePayouts(deps);
+    expect(report.keptReserved).toHaveLength(1);
+    expect(report.keptReserved[0]).toMatchObject({ payoutId: "p1", reason: "never_broadcast" });
+    expect(fetchReceipt).not.toHaveBeenCalled();
+    expect(finalize).not.toHaveBeenCalled();
+    expect(markFailed).not.toHaveBeenCalled();
+  });
+
+  it("finalizes each confirmed payout exactly once with its own payout id", async () => {
+    const { deps, fetchReceipt, finalize } = makeDeps({
+      rows: [
+        makeRow({ id: "p1", txHash: "0xabc111" }),
+        makeRow({ id: "p2", txHash: "0xabc222" }),
+      ],
+    });
+    const report = await reconcilePayouts(deps);
+    expect(report.confirmed).toHaveLength(2);
+    expect(fetchReceipt).toHaveBeenCalledTimes(2);
+    expect(fetchReceipt).toHaveBeenCalledWith("0xabc111");
+    expect(fetchReceipt).toHaveBeenCalledWith("0xabc222");
+    expect(finalize).toHaveBeenCalledTimes(2);
+    expect(
+      (finalize.mock.calls as unknown as Array<[string, Date]>).map((c) => c[0])
+    ).toEqual(["p1", "p2"]);
+  });
+
   it("keeps reserved when the RPC is unavailable", async () => {
     const { deps } = makeDeps({ receiptError: new Error("rpc down") });
     const report = await reconcilePayouts(deps);

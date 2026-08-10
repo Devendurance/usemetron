@@ -21,11 +21,15 @@ import {
   markPayoutSubmitted,
   reserveEarningForPayout,
   reserveOutstandingEarnings,
+  type PayoutRow,
 } from "../db/payouts";
 import { getEarningByReceipt } from "../db/ledger";
+import { logEvent } from "../observability/logger";
 import { METRON_ATTRIBUTION_TAG, METRON_SETTLEMENT_WALLET, USDC_ADDRESS } from "../celo/config";
-import { broadcastPayout, type PayoutBroadcastDeps } from "./broadcast";
+import { acquirePayoutWalletLock, releasePayoutWalletLock } from "../redis/locks";
+import { broadcastPayout, type PayoutBroadcastDeps, type PayoutBroadcastResult } from "./broadcast";
 import { attemptPayoutForReceipt, type PayoutHandoffResult } from "./handoff";
+import { withPayoutWalletLock } from "./wallet-lock";
 import { reconcilePayouts, type PayoutReceiptEvidence } from "./reconcile";
 import { requestPayout, type PayoutRequestOutcome } from "./service";
 
@@ -71,6 +75,40 @@ async function fetchPayoutReceiptEvidence(txHash: string): Promise<PayoutReceipt
     transfers: parseTransferLogs(receipt),
     txInput,
   };
+}
+
+/**
+ * How long the per-wallet payout lock is held. Covers the full
+ * nonce-fetch → sign → broadcast → receipt-wait window (~90s receipt
+ * timeout plus preflight), so a concurrent submission cannot interleave
+ * and nonce-collide. The TTL is also the backstop if a process dies
+ * holding the lock.
+ */
+const PAYOUT_WALLET_LOCK_TTL_SECONDS = 120;
+
+/**
+ * Serializes the whole submit sequence (preflight → getNonce → sign →
+ * broadcast → receipt wait) per settlement wallet. Fail-open: if the
+ * lock cannot be acquired (contended or Redis unavailable) the broadcast
+ * still runs with the lock degraded — payout submission is never
+ * stranded. Uncontended behavior is a pure passthrough. Lock degradation
+ * is observable via `payout_lock_degraded` (scope-only, no wallet
+ * identity in logs).
+ */
+function lockedBroadcast(payout: PayoutRow): Promise<PayoutBroadcastResult> {
+  return withPayoutWalletLock(
+    { wallet: METRON_SETTLEMENT_WALLET, ttlSeconds: PAYOUT_WALLET_LOCK_TTL_SECONDS },
+    { acquire: acquirePayoutWalletLock, release: releasePayoutWalletLock },
+    () => broadcastPayout(payout, buildBroadcastDeps())
+  ).then((outcome) => {
+    if (!outcome.locked) {
+      // The broadcast ran without the per-wallet lock (degraded, by
+      // design). Logged scope-only: the settlement wallet is a public
+      // address but logs must stay secret-free.
+      logEvent("payout_lock_degraded", { scope: "payout" });
+    }
+    return outcome.result;
+  });
 }
 
 function buildBroadcastDeps(): PayoutBroadcastDeps {
@@ -185,7 +223,7 @@ export const payoutService: { requestPayout: (developerId: string) => Promise<Pa
         attributionTag: METRON_ATTRIBUTION_TAG,
         developerWallet: getDeveloperWallet,
         reserve: reserveOutstandingEarnings,
-        broadcast: (payout) => broadcastPayout(payout, buildBroadcastDeps()),
+        broadcast: (payout) => lockedBroadcast(payout),
         now: () => new Date(),
       })),
 };
@@ -222,7 +260,7 @@ export const payoutHandoff: {
           developerWallet: getDeveloperWallet,
           getEarningByReceipt,
           reserveEarning: reserveEarningForPayout,
-          broadcast: (payout) => broadcastPayout(payout, buildBroadcastDeps()),
+          broadcast: (payout) => lockedBroadcast(payout),
           now: () => new Date(),
         }
       )),

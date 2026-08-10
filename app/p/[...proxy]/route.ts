@@ -23,10 +23,19 @@ import { createSettlementService } from "@/lib/gateway/settlement-service";
 import { runSettlementAttempt } from "@/lib/gateway/settlement-flow";
 import { buildSettledDelivery } from "@/lib/gateway/delivery";
 import { markSettlementPendingAttempt } from "@/lib/db/settlement-recovery";
-import { extractPaymentIdentity, authorizationDeadline } from "@/lib/x402/payload";
+import {
+  decodePaymentSignature,
+  extractPaymentIdentity,
+  authorizationDeadline,
+} from "@/lib/x402/payload";
+import { paymentIdentifierFor } from "@/lib/x402/payment-id";
 import { settlePayment } from "@/lib/x402/client";
-import { isPayoutsEnabled, isSettlementEnabled } from "@/lib/env";
+import { isPayoutsEnabled, isRateLimitProxyTrusted, isSettlementEnabled } from "@/lib/env";
 import { payoutHandoff } from "@/lib/payouts/instance";
+import { resolveClientIdentifier } from "@/lib/ratelimit/client-ip";
+import { rateLimiter } from "@/lib/ratelimit/redis-limiter";
+import { RATE_LIMIT_POLICIES, scopeLabel } from "@/lib/ratelimit/policy";
+import { logEvent } from "@/lib/observability/logger";
 
 type ProxyContext = { params: Promise<{ proxy: string[] }> };
 
@@ -49,17 +58,63 @@ const REQUEST_TOO_LARGE_BODY = JSON.stringify({
   message: "Request body exceeds the 1 MiB limit.",
 });
 
+/** Machine-readable 429 body; retryAfterSeconds tells the client when to retry. */
+function rateLimitedBody(retryAfterSeconds: number): string {
+  return JSON.stringify({
+    error: "RATE_LIMITED",
+    message: "Too many requests. Try again later.",
+    retryAfterSeconds,
+  });
+}
+
+function rateLimitedResponse(retryAfterSeconds: number): Response {
+  return new Response(rateLimitedBody(retryAfterSeconds), {
+    status: 429,
+    headers: {
+      "content-type": "application/json",
+      "retry-after": String(retryAfterSeconds),
+    },
+  });
+}
+
+/**
+ * Best-effort payment identifier derived from a raw PAYMENT-SIGNATURE
+ * header, using the same pure derivation as the gateway service (so the
+ * rate-limit bucket matches the replay-lock identity). Returns null when
+ * the payload cannot be decoded; callers then fall back to the IP
+ * identifier — the Redis replay lock still serializes per-payment.
+ */
+function paymentIdentifierFromSignature(signatureHeader: string): string | null {
+  try {
+    const payload = decodePaymentSignature(signatureHeader);
+    return paymentIdentifierFor(extractPaymentIdentity(payload));
+  } catch {
+    return null;
+  }
+}
+
 function methodNotAllowed() {  return new Response(null, {
     status: 405,
     headers: { Allow: ALLOW },
   });
 }
 
-/** Secret-safe stage log (never logs payloads, signatures, or secrets). */
-function stageLog(stage: string, fields: Record<string, string | number>) {
-  console.log(
-    JSON.stringify({ stage, ts: new Date().toISOString(), ...fields })
-  );
+/**
+ * Maps a handoff payout status onto its truthful PRD §23 stage name.
+ * UNKNOWN is never called "failed": the reservation stands and recovery
+ * reconciles it, so it gets its own honest stage.
+ */
+function payoutStageFor(status: "CONFIRMED" | "FAILED" | "SUBMITTED" | "UNKNOWN"): string {
+  switch (status) {
+    case "CONFIRMED":
+      return "payout_confirmed";
+    case "FAILED":
+      return "payout_failed";
+    case "SUBMITTED":
+      return "payout_submitted";
+    case "UNKNOWN":
+      return "payout_unknown";
+  }
 }
 
 const settlementService = createSettlementService({ settle: settlePayment });
@@ -128,9 +183,35 @@ async function handleResourceRequest(
   });
   const encodedRequirement = encodePaymentRequiredHeader(paymentRequired);
 
+  // M11: client identifier for rate limiting — X-Forwarded-For is only
+  // consulted when the deployment proxy-trust flag is explicitly enabled.
+  const ipIdentifier = resolveClientIdentifier(request, isRateLimitProxyTrusted());
+
   const signatureHeader = request.headers.get("payment-signature");
 
   if (signatureHeader !== null && signatureHeader !== "") {
+    // M11: signed gateway attempts are limited by payment identifier when
+    // the payload parses (same identity as the replay lock), falling back
+    // to the IP identifier otherwise. Applies BEFORE processing; when
+    // allowed, replay 409 / verification / settlement semantics are
+    // untouched. Fail-open (degraded) never strands a paid request.
+    const signedVerdict = await rateLimiter.check({
+      ...RATE_LIMIT_POLICIES.gatewaySigned,
+      identifier: paymentIdentifierFromSignature(signatureHeader) ?? ipIdentifier,
+    });
+
+    if (signedVerdict.degraded) {
+      // Observable fail-open: logged here, never inside the limiter.
+      logEvent("rate_limit_degraded", {
+        requestId,
+        scope: scopeLabel("gatewaySigned"),
+      });
+    }
+
+    if (!signedVerdict.allowed) {
+      return rateLimitedResponse(signedVerdict.retryAfterSeconds);
+    }
+
     const result = await gatewayService.processSignedRequest({
       route: {
         id: route.id,
@@ -145,6 +226,14 @@ async function handleResourceRequest(
 
     if (result.kind === "verified") {
       // ---- M5: safe upstream execution after VERIFIED receipt ----
+      logEvent("payment_verified", {
+        requestId,
+        receiptId: result.receiptId,
+        paymentIdentifier: result.paymentIdentifier,
+        routeId: route.id,
+        developerId: route.developerId,
+      });
+
       const callerSegments = proxy.slice(1).map((segment) => {
         try {
           return decodeURIComponent(segment);
@@ -154,10 +243,11 @@ async function handleResourceRequest(
       });
       const { body, tooLarge } = await readCallerBody(request, request.method);
       if (tooLarge) {
-        stageLog("upstream_skipped_body_too_large", {
+        logEvent("upstream_skipped_body_too_large", {
           requestId,
           receiptId: result.receiptId,
           routeId: route.id,
+          developerId: route.developerId,
         });
         return new Response(REQUEST_TOO_LARGE_BODY, {
           status: 413,
@@ -166,11 +256,12 @@ async function handleResourceRequest(
       }
 
       const callerHeaders = Array.from(request.headers.entries());
-      stageLog("upstream_started", {
+      logEvent("upstream_started", {
         requestId,
         receiptId: result.receiptId,
         paymentIdentifier: result.paymentIdentifier,
         routeId: route.id,
+        developerId: route.developerId,
         method: request.method,
       });
 
@@ -191,10 +282,12 @@ async function handleResourceRequest(
       });
 
       if (execution.kind === "request_rejected") {
-        stageLog("upstream_failed", {
+        logEvent("upstream_failed", {
           requestId,
           receiptId: result.receiptId,
+          paymentIdentifier: result.paymentIdentifier,
           routeId: route.id,
+          developerId: route.developerId,
           errorCode: execution.errorCode,
         });
         await markUpstreamResult(result.receiptId, {
@@ -213,11 +306,12 @@ async function handleResourceRequest(
       }
 
       if (execution.kind === "failed") {
-        stageLog("upstream_failed", {
+        logEvent("upstream_failed", {
           requestId,
           receiptId: result.receiptId,
           paymentIdentifier: result.paymentIdentifier,
           routeId: route.id,
+          developerId: route.developerId,
           errorCode: execution.errorCode,
           status: execution.status ?? 0,
           latencyMs: execution.latencyMs,
@@ -244,11 +338,12 @@ async function handleResourceRequest(
 
       // 2xx upstream work: persist status + latency; payment remains
       // VERIFIED (unsettled) until settlement.
-      stageLog("upstream_succeeded", {
+      logEvent("upstream_succeeded", {
         requestId,
         receiptId: result.receiptId,
         paymentIdentifier: result.paymentIdentifier,
         routeId: route.id,
+        developerId: route.developerId,
         status: execution.status,
         latencyMs: execution.latencyMs,
       });
@@ -261,10 +356,11 @@ async function handleResourceRequest(
 
       // ---- M6/M7.1: settlement (money switch gated) ----
       if (!isSettlementEnabled()) {
-        stageLog("settlement_disabled", {
+        logEvent("settlement_disabled", {
           requestId,
           receiptId: result.receiptId,
           routeId: route.id,
+          developerId: route.developerId,
         });
         return new Response(
           JSON.stringify({
@@ -283,11 +379,12 @@ async function handleResourceRequest(
         );
       }
 
-      stageLog("settlement_started", {
+      logEvent("settlement_started", {
         requestId,
         receiptId: result.receiptId,
         paymentIdentifier: result.paymentIdentifier,
         routeId: route.id,
+        developerId: route.developerId,
       });
 
       // Durable pre-settle state + exactly-once /settle + classification.
@@ -332,12 +429,25 @@ async function handleResourceRequest(
       const settlement = await settlementFlow;
 
       if (settlement.kind === "settled") {
-        stageLog("settlement_succeeded", {
+        logEvent("settlement_succeeded", {
           requestId,
           receiptId: result.receiptId,
           paymentIdentifier: result.paymentIdentifier,
           routeId: route.id,
+          developerId: route.developerId,
         });
+
+        // M10 exact-earning ledger entry (applied atomically with SETTLED).
+        if (settlement.earningCreated) {
+          logEvent("ledger_created", {
+            requestId,
+            receiptId: result.receiptId,
+            paymentIdentifier: result.paymentIdentifier,
+            routeId: route.id,
+            developerId: route.developerId,
+            amountMicroUsdc: route.priceMicroUsdc,
+          });
+        }
 
         // ---- M10: exact-earning creator payout handoff (best effort) ----
         // The payout outcome NEVER affects caller delivery: success,
@@ -347,6 +457,13 @@ async function handleResourceRequest(
         // resource. Only safe fields are logged (no secrets, signatures,
         // or error messages; the tx hash is only logged as a presence
         // boolean — full hashes live in the payouts table).
+        logEvent("payout_started", {
+          requestId,
+          receiptId: result.receiptId,
+          paymentIdentifier: result.paymentIdentifier,
+          routeId: route.id,
+          developerId: route.developerId,
+        });
         try {
           const payout = await payoutHandoff.attemptPayoutForReceipt(
             route.developerId,
@@ -354,26 +471,34 @@ async function handleResourceRequest(
             isPayoutsEnabled()
           );
           if (payout.kind === "skipped") {
-            stageLog("payout_attempt", {
+            logEvent("payout_skipped", {
               requestId,
               receiptId: result.receiptId,
+              paymentIdentifier: result.paymentIdentifier,
+              routeId: route.id,
+              developerId: route.developerId,
               kind: payout.kind,
               reason: payout.reason,
             });
           } else {
-            stageLog("payout_attempt", {
+            logEvent(payoutStageFor(payout.status), {
               requestId,
               receiptId: result.receiptId,
-              kind: payout.kind,
+              paymentIdentifier: result.paymentIdentifier,
+              routeId: route.id,
+              developerId: route.developerId,
               status: payout.status,
               payoutId: payout.payoutId,
               txHashPresent: payout.txHash !== null ? 1 : 0,
             });
           }
         } catch {
-          stageLog("payout_attempt", {
+          logEvent("payout_failed", {
             requestId,
             receiptId: result.receiptId,
+            paymentIdentifier: result.paymentIdentifier,
+            routeId: route.id,
+            developerId: route.developerId,
             kind: "error",
           });
         }
@@ -388,6 +513,15 @@ async function handleResourceRequest(
           network: settlement.network,
           receiptId: result.receiptId,
         });
+        logEvent("response_delivered", {
+          requestId,
+          receiptId: result.receiptId,
+          paymentIdentifier: result.paymentIdentifier,
+          routeId: route.id,
+          developerId: route.developerId,
+          status: delivery.status,
+          latencyMs: execution.latencyMs,
+        });
         return new Response(delivery.body, {
           status: delivery.status,
           headers: delivery.headers,
@@ -395,11 +529,14 @@ async function handleResourceRequest(
       }
 
       if (settlement.kind === "ambiguous") {
-        stageLog("settlement_failed", {
+        // Durable SETTLEMENT_PENDING was written before /settle; the
+        // onchain outcome is unknown and must be reconciled.
+        logEvent("settlement_pending", {
           requestId,
           receiptId: result.receiptId,
           paymentIdentifier: result.paymentIdentifier,
           routeId: route.id,
+          developerId: route.developerId,
           errorCode: "SETTLEMENT_UNKNOWN",
           status: settlement.status,
         });
@@ -420,10 +557,11 @@ async function handleResourceRequest(
       }
 
       if (settlement.kind === "persist_failed") {
-        stageLog("settlement_persist_failed", {
+        logEvent("settlement_persist_failed", {
           requestId,
           receiptId: result.receiptId,
           routeId: route.id,
+          developerId: route.developerId,
         });
         // Onchain outcome confirmed but final persistence failed; the
         // receipt remains durably SETTLEMENT_PENDING and recovery
@@ -443,11 +581,12 @@ async function handleResourceRequest(
       }
 
       // Explicit rejection/failure (durably persisted by the flow).
-      stageLog("settlement_failed", {
+      logEvent("settlement_failed", {
         requestId,
         receiptId: result.receiptId,
         paymentIdentifier: result.paymentIdentifier,
         routeId: route.id,
+        developerId: route.developerId,
         errorCode: settlement.errorCode,
       });
       return new Response(
@@ -495,6 +634,26 @@ async function handleResourceRequest(
         });
       }
     }
+  }
+
+  // M11: anonymous (unpaid) traffic is limited by IP before the 402. The
+  // settled/paid flow above is NEVER limited here — already-paid requests
+  // must never be stranded by abuse protection.
+  const anonVerdict = await rateLimiter.check({
+    ...RATE_LIMIT_POLICIES.gatewayAnonymous,
+    identifier: ipIdentifier,
+  });
+
+  if (anonVerdict.degraded) {
+    // Observable fail-open: logged here, never inside the limiter.
+    logEvent("rate_limit_degraded", {
+      requestId,
+      scope: scopeLabel("gatewayAnonymous"),
+    });
+  }
+
+  if (!anonVerdict.allowed) {
+    return rateLimitedResponse(anonVerdict.retryAfterSeconds);
   }
 
   return new Response(REQUIRED_BODY, {

@@ -76,14 +76,18 @@ function makeRepo() {
   return repo;
 }
 
-function makeService(repo = makeRepo(), overrides: { slugs?: string[] } = {}) {
+function makeService(
+  repo = makeRepo(),
+  overrides: { slugs?: string[]; appUrl?: string } = {}
+) {
   const slugQueue = overrides.slugs ? [...overrides.slugs] : [];
   let slugCounter = 0;
   return {
     repo,
     service: createEndpointService({
       routes: repo,
-      appUrl: "http://localhost:3000/",
+      // Default keeps the dev base so pre-existing tests are untouched.
+      appUrl: overrides.appUrl ?? "http://localhost:3000/",
       encryptionKey: KEY,
       rejectHttp: true,
       generateSlug: () =>
@@ -207,6 +211,58 @@ describe("endpoint service — create", () => {
     const { service } = makeService(repo, { slugs: ["testslug0001", "testslug0002"] });
     const view = await service.create(DEV_A, BASE_INPUT);
     expect(view.slug).toBe("testslug0002");
+  });
+});
+
+describe("endpoint service — powered URL construction", () => {
+  const PROD_BASE = "https://usemetron.vercel.app";
+
+  it("builds the canonical powered URL from the production base", async () => {
+    const { service } = makeService(undefined, {
+      appUrl: PROD_BASE,
+      slugs: ["test-slug"],
+    });
+    const view = await service.create(DEV_A, BASE_INPUT);
+    expect(view.poweredUrl).toBe(`${PROD_BASE}/p/test-slug`);
+  });
+
+  it("normalizes a production base with one trailing slash", async () => {
+    const { service } = makeService(undefined, {
+      appUrl: `${PROD_BASE}/`,
+      slugs: ["test-slug"],
+    });
+    const view = await service.create(DEV_A, BASE_INPUT);
+    expect(view.poweredUrl).toBe(`${PROD_BASE}/p/test-slug`);
+  });
+
+  it("collapses multiple trailing slashes (no double slash at the junction)", async () => {
+    const { service } = makeService(undefined, {
+      appUrl: `${PROD_BASE}///`,
+      slugs: ["test-slug"],
+    });
+    const view = await service.create(DEV_A, BASE_INPUT);
+    expect(view.poweredUrl).toBe(`${PROD_BASE}/p/test-slug`);
+    // The https:// protocol legitimately contains "//"; assert there is no
+    // "//" anywhere after the base (a broken junction like "//p/" would hit).
+    expect(view.poweredUrl.indexOf("//", PROD_BASE.length)).toBe(-1);
+  });
+
+  it("never leaks localhost when the base is the production URL", async () => {
+    const { service } = makeService(undefined, {
+      appUrl: PROD_BASE,
+      slugs: ["test-slug"],
+    });
+    const view = await service.create(DEV_A, BASE_INPUT);
+    expect(view.poweredUrl).not.toContain("localhost");
+  });
+
+  it("keeps the dev fallback base (no trailing slash) intact", async () => {
+    const { service } = makeService(undefined, {
+      appUrl: "http://localhost:3000",
+      slugs: ["test-slug"],
+    });
+    const view = await service.create(DEV_A, BASE_INPUT);
+    expect(view.poweredUrl).toBe("http://localhost:3000/p/test-slug");
   });
 });
 

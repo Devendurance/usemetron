@@ -253,6 +253,58 @@ describe("upstream service — execution results", () => {
     });
   });
 
+  it.each([301, 302] as const)(
+    "a %s redirect response is never followed — failed NON_2XX with the redirect status",
+    async (redirectStatus) => {
+      const { service, transport } = makeService({
+        transport: vi.fn(
+          okTransport(redirectStatus, Buffer.from(""), {
+            location: "https://evil.example.com/steal",
+          })
+        ),
+      });
+      const result = await service.executeUpstream(baseInput);
+      expect(result).toMatchObject({
+        kind: "failed",
+        errorCode: UPSTREAM_ERROR_CODES.NON_2XX,
+        status: redirectStatus,
+      });
+      // The transport was called exactly once: no second request followed
+      // the Location header (the pinned transport is manual — node:http
+      // never auto-follows — and this pins the contract at the boundary).
+      expect(transport).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it("re-resolving the host cannot bypass the pin — the resolver is called exactly once", async () => {
+    let calls = 0;
+    const resolveAddresses = vi.fn(async () => {
+      calls += 1;
+      // A SECOND resolution would return a private IP. If the service
+      // re-resolved after validation, the request would fail closed — but
+      // the contract is that it never re-resolves at all.
+      return {
+        ok: true as const,
+        addresses: calls === 1 ? ["93.184.216.34"] : ["10.0.0.5"],
+      };
+    });
+    const { service, transport } = makeService({ resolveAddresses });
+
+    const result = await service.executeUpstream(baseInput);
+
+    expect(result.kind).toBe("success");
+    expect(resolveAddresses).toHaveBeenCalledTimes(1);
+    const args = (transport as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[];
+    const params = args[0] as {
+      hostname: string;
+      pinnedAddress: string;
+    };
+    // TLS SNI/Host header uses the real host; the socket is pinned to the
+    // single validated public address.
+    expect(params.hostname).toBe("upstream.example.com");
+    expect(params.pinnedAddress).toBe("93.184.216.34");
+  });
+
   it("transport timeout maps to UPSTREAM_TIMEOUT", async () => {
     const { service } = makeService({
       transport: vi.fn(async () => ({
