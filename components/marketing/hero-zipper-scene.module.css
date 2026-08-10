@@ -40,13 +40,11 @@
 .leftShutter {
   left: 0;
   border-right: 2px solid var(--metron-blueprint);
-  transform: translate3d(-96%, 0, 0);
 }
 
 .rightShutter {
   right: 0;
   border-left: 2px solid var(--metron-blueprint);
-  transform: translate3d(96%, 0, 0);
 }
 
 .zipperOverlay {
@@ -98,21 +96,60 @@
   margin-right: 5px;
 }
 
-.pull {
+.zipperControl {
   position: absolute;
   z-index: 3;
   top: 7%;
   left: 50%;
   display: grid;
-  width: 34px;
-  height: 54px;
+  width: 44px;
+  height: 60px;
+  place-items: center;
+  cursor: ns-resize;
+  pointer-events: auto;
+  touch-action: none;
+  transform: translateX(-50%);
+  will-change: transform;
+}
+
+.zipperControl:focus-visible {
+  outline: 3px solid var(--metron-blueprint);
+  outline-offset: 4px;
+}
+
+.instruction {
+  position: absolute;
+  z-index: 4;
+  top: calc(7% - 28px);
+  right: calc(100% + 8px);
+  margin: 0;
+  border: 1px solid var(--metron-ink);
+  border-radius: 9999px;
+  background: var(--metron-cream);
+  padding: 4px 8px;
+  color: var(--metron-ink);
+  font-family: var(--font-metadata);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.touchInstruction {
+  display: none;
+}
+
+.pull {
+  display: grid;
+  width: 100%;
+  height: 100%;
   place-items: center;
   border: 2px solid var(--metron-ink);
   border-radius: 9999px 9999px 14px 14px;
   background: var(--metron-transaction-gold);
-  transform: translate3d(-50%, var(--zipper-pull-travel), 0);
   transform-origin: 50% 0;
-  will-change: transform;
 }
 
 .zipperOrigin {
@@ -211,34 +248,6 @@
   background: var(--metron-transaction-gold);
 }
 
-.previewLabel,
-.previewNote {
-  position: absolute;
-  z-index: 4;
-  left: 50%;
-  margin: 0;
-  border: 1px solid var(--metron-ink);
-  border-radius: 9999px;
-  background: var(--metron-cream);
-  padding: 4px 10px;
-  color: var(--metron-ink);
-  font-family: var(--font-metadata);
-  font-size: 0.6875rem;
-  font-weight: 700;
-  line-height: 1.25;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-  transform: translateX(-50%);
-}
-
-.previewLabel {
-  top: 2%;
-}
-
-.previewNote {
-  bottom: 1.5%;
-}
-
 @media (min-width: 600px) and (max-width: 1023px) {
   .pocket {
     width: 90vw;
@@ -298,9 +307,9 @@
     height: 4px;
   }
 
-  .pull {
-    width: 30px;
-    height: 46px;
+  .zipperControl {
+    width: 44px;
+    height: 52px;
   }
 
   .zipperOverlay {
@@ -309,6 +318,21 @@
     left: calc(100% - 17px);
     width: 36px;
     height: 76%;
+  }
+
+  .instruction {
+    top: calc(7% - 24px);
+    right: calc(100% + 4px);
+    padding: 3px 6px;
+    font-size: 0.5625rem;
+  }
+
+  .mouseInstruction {
+    display: none;
+  }
+
+  .touchInstruction {
+    display: inline;
   }
 
   .pullGrip {
@@ -353,32 +377,12 @@
     top: 91%;
   }
 
-  .previewLabel,
-  .previewNote {
-    max-width: calc(100% - 24px);
-    overflow: hidden;
-    padding: 3px 8px;
-    font-size: 0.625rem;
-    text-overflow: ellipsis;
-  }
-
-  .previewLabel {
-    top: 1%;
-  }
-
-  .previewNote {
-    bottom: 0.5%;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .shutter,
-  .pull,
+  .zipperControl,
   .previewCard {
     will-change: auto;
-  }
-
-  .previewCard {
-    transform: translate(-50%, -50%);
   }
 }

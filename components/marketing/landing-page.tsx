@@ -14,6 +14,7 @@ import { CallLine, MetronReceipt } from "@/components/metron"
 import { AuthCta } from "@/components/auth/auth-cta"
 
 import { HeroSection } from "./hero-section"
+import { LandingReveal } from "./landing-reveal"
 import { MarketingHeader } from "./marketing-header"
 
 const receiptFields = [
@@ -52,7 +53,9 @@ function LandingPage() {
       <main>
         <HeroSection />
 
+        <LandingReveal>
         <section
+          data-landing-reveal
           id="call-line"
           aria-labelledby="call-line-heading"
           className="scroll-mt-6 border-y border-border bg-clear-paper"
@@ -75,6 +78,7 @@ function LandingPage() {
         </section>
 
         <section
+          data-landing-reveal
           aria-label="Who Metron is for"
           className="mx-auto grid w-full max-w-[1280px] gap-6 px-4 py-16 sm:px-8 sm:py-20 md:grid-cols-2 lg:px-12 lg:py-24"
         >
@@ -131,6 +135,7 @@ function LandingPage() {
         </section>
 
         <section
+          data-landing-reveal
           id="demo"
           aria-labelledby="receipt-heading"
           className="scroll-mt-6 bg-ink text-clear-paper"
@@ -177,7 +182,7 @@ function LandingPage() {
           </div>
         </section>
 
-        <section aria-labelledby="celo-heading">
+        <section data-landing-reveal aria-labelledby="celo-heading">
           <div className="mx-auto w-full max-w-[1280px] px-4 py-16 sm:px-8 sm:py-20 lg:px-12 lg:py-24">
             <div className="grid overflow-hidden rounded-card border-2 border-blueprint bg-clear-paper md:grid-cols-[0.9fr_1.1fr]">
               <div className="flex min-h-64 flex-col justify-between bg-blueprint p-6 text-clear-paper sm:p-8 lg:p-10">
@@ -228,6 +233,7 @@ function LandingPage() {
         </section>
 
         <section
+          data-landing-reveal
           id="how-it-works"
           aria-labelledby="steps-heading"
           className="scroll-mt-6 border-y border-border bg-clear-paper"
@@ -278,7 +284,10 @@ function LandingPage() {
           </div>
         </section>
 
-        <section className="mx-auto w-full max-w-[1280px] px-4 py-16 sm:px-8 sm:py-20 lg:px-12 lg:py-24">
+        <section
+          data-landing-reveal
+          className="mx-auto w-full max-w-[1280px] px-4 py-16 sm:px-8 sm:py-20 lg:px-12 lg:py-24"
+        >
           <div className="rounded-card bg-lime p-6 sm:p-10 lg:flex lg:items-end lg:justify-between lg:gap-12 lg:p-14">
             <div>
               <p className="font-metadata text-xs font-bold tracking-[0.12em] uppercase">
@@ -299,6 +308,7 @@ function LandingPage() {
             />
           </div>
         </section>
+        </LandingReveal>
       </main>
 
       <footer className="border-t border-border">
