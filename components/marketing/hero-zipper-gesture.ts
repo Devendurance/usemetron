@@ -26,6 +26,25 @@ function settleZipperProgress(wasOpen: boolean, progress: number) {
   return wasOpen ? (clampedProgress <= 0.3 ? 0 : 1) : clampedProgress >= 0.7 ? 1 : 0
 }
 
+function getSettledZipperEndpoint(
+  previousEndpoint: 0 | 1,
+  progress: number
+): 0 | 1 {
+  const clampedProgress = clampProgress(progress)
+
+  return clampedProgress === 0 || clampedProgress === 1
+    ? clampedProgress
+    : previousEndpoint
+}
+
+function resolvePointerEndProgress(
+  wasOpen: boolean,
+  progress: number,
+  wasCancelled: boolean
+) {
+  return wasCancelled ? (wasOpen ? 1 : 0) : settleZipperProgress(wasOpen, progress)
+}
+
 function getKeyboardProgress(key: string, progress: number) {
   const clampedProgress = clampProgress(progress)
 
@@ -51,6 +70,8 @@ function getKeyboardProgress(key: string, progress: number) {
 export {
   getKeyboardProgress,
   getProgressFromVerticalDrag,
+  getSettledZipperEndpoint,
   isZipperDragStart,
+  resolvePointerEndProgress,
   settleZipperProgress,
 }

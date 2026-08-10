@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest"
 
 import {
   getKeyboardProgress,
+  getSettledZipperEndpoint,
   getProgressFromVerticalDrag,
   isZipperDragStart,
+  resolvePointerEndProgress,
   settleZipperProgress,
 } from "./hero-zipper-gesture"
 
@@ -42,6 +44,37 @@ describe("settleZipperProgress", () => {
   it("closes an open zipper at the thirty-percent threshold", () => {
     expect(settleZipperProgress(true, 0.3)).toBe(0)
     expect(settleZipperProgress(true, 0.301)).toBe(1)
+  })
+})
+
+describe("getSettledZipperEndpoint", () => {
+  it("keeps a closed endpoint authoritative through partial keyboard progress", () => {
+    expect(getSettledZipperEndpoint(0, 0.5)).toBe(0)
+    expect(settleZipperProgress(false, 0.5)).toBe(0)
+    expect(settleZipperProgress(false, 0.7)).toBe(1)
+  })
+
+  it("keeps an open endpoint authoritative through partial keyboard progress", () => {
+    expect(getSettledZipperEndpoint(1, 0.5)).toBe(1)
+    expect(settleZipperProgress(true, 0.5)).toBe(1)
+    expect(settleZipperProgress(true, 0.3)).toBe(0)
+  })
+
+  it("changes the settled endpoint only at an exact endpoint", () => {
+    expect(getSettledZipperEndpoint(0, 1)).toBe(1)
+    expect(getSettledZipperEndpoint(1, 0)).toBe(0)
+  })
+})
+
+describe("resolvePointerEndProgress", () => {
+  it("uses threshold settlement after a successful pointer up", () => {
+    expect(resolvePointerEndProgress(false, 0.7, false)).toBe(1)
+    expect(resolvePointerEndProgress(true, 0.3, false)).toBe(0)
+  })
+
+  it("restores the prior endpoint after cancellation or lost capture", () => {
+    expect(resolvePointerEndProgress(false, 0.9, true)).toBe(0)
+    expect(resolvePointerEndProgress(true, 0.1, true)).toBe(1)
   })
 })
 

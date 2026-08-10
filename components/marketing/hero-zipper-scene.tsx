@@ -7,8 +7,9 @@ import { gsap } from "gsap"
 import {
   getKeyboardProgress,
   getProgressFromVerticalDrag,
+  getSettledZipperEndpoint,
   isZipperDragStart,
-  settleZipperProgress,
+  resolvePointerEndProgress,
 } from "./hero-zipper-gesture"
 import styles from "./hero-zipper-scene.module.css"
 
@@ -55,6 +56,7 @@ function HeroZipperScene() {
   const root = useRef<HTMLDivElement>(null)
   const timeline = useRef<gsap.core.Timeline | null>(null)
   const settleTween = useRef<gsap.core.Tween | null>(null)
+  const applyReducedVisual = useRef<((open: boolean) => void) | null>(null)
   const reduceMotion = useRef(false)
   const activePointer = useRef<number | null>(null)
   const dragStartProgress = useRef(0)
@@ -63,17 +65,21 @@ function HeroZipperScene() {
   const isOpen = useRef(false)
   const currentProgress = useRef(0)
   const [progress, setProgress] = useState(0)
+  const [routesExposed, setRoutesExposed] = useState(false)
 
   const updateProgress = (nextProgress: number, commit = false) => {
     const boundedProgress = clampProgress(nextProgress)
-    const visualProgress = reduceMotion.current
-      ? isOpen.current
-        ? 1
-        : 0
-      : boundedProgress
 
-    timeline.current?.progress(visualProgress).pause()
+    if (reduceMotion.current) {
+      applyReducedVisual.current?.(isOpen.current)
+    } else {
+      timeline.current?.progress(boundedProgress).pause()
+    }
+
     currentProgress.current = boundedProgress
+    if (boundedProgress !== 1) {
+      setRoutesExposed(false)
+    }
     if (commit) {
       setProgress(boundedProgress)
     }
@@ -81,9 +87,12 @@ function HeroZipperScene() {
 
   const settleToProgress = (nextProgress: 0 | 1) => {
     settleTween.current?.kill()
+    isOpen.current = nextProgress === 1
+    setRoutesExposed(false)
 
     if (reduceMotion.current || !timeline.current) {
       updateProgress(nextProgress, true)
+      setRoutesExposed(nextProgress === 1)
       return
     }
 
@@ -94,6 +103,7 @@ function HeroZipperScene() {
       onUpdate: () => updateProgress(currentProgress.current),
       onComplete: () => {
         updateProgress(nextProgress, true)
+        setRoutesExposed(nextProgress === 1)
         settleTween.current = null
       },
     })
@@ -127,15 +137,6 @@ function HeroZipperScene() {
           const conditions = context.conditions as SceneConditions
           const shouldReduceMotion = Boolean(conditions.reduceMotion)
           reduceMotion.current = shouldReduceMotion
-          const pullTravel = readCssNumber(
-            zipperOverlay,
-            "--zipper-pull-travel"
-          )
-          const perspectiveTilt = conditions.desktop
-            ? 13
-            : conditions.tablet
-              ? 9
-              : 6
           const zipperOriginPosition = () => {
             const sceneBounds = scene.getBoundingClientRect()
             const originBounds = zipperOrigin.getBoundingClientRect()
@@ -145,25 +146,62 @@ function HeroZipperScene() {
               y: originBounds.top + originBounds.height / 2 - sceneBounds.top,
             }
           }
-          const cardClosedX = (index: number) =>
-            zipperOriginPosition().x - cards[index].offsetLeft
-          const cardClosedY = (index: number) =>
-            zipperOriginPosition().y - cards[index].offsetTop
-          const cardRotation = (index: number) => readRotation(cards[index])
-          const sceneTimeline = gsap.timeline({ paused: true })
+          const measureCards = () => {
+            const origin = zipperOriginPosition()
 
-          gsap.set([leftShutter, rightShutter], { xPercent: 0 })
+            return cards.map((card) => ({
+              closedX: origin.x - card.offsetLeft,
+              closedY: origin.y - card.offsetTop,
+              rotation: readRotation(card),
+            }))
+          }
+          let cardGeometry = measureCards()
+          const cardRotation = (index: number) => cardGeometry[index].rotation
+
+          gsap.set([leftShutter, rightShutter], { opacity: 0.94, xPercent: 0 })
           gsap.set(pull, { y: 0 })
-          gsap.set(cards, {
-            x: (index) => cardClosedX(index),
-            xPercent: -50,
-            y: (index) => cardClosedY(index),
-            yPercent: -50,
-            rotation: 0,
-            rotationX: shouldReduceMotion ? 0 : perspectiveTilt,
-            rotationY: shouldReduceMotion ? 0 : (index) => (index % 2 === 0 ? -8 : 8),
-            opacity: 0,
-          })
+
+          if (shouldReduceMotion) {
+            const setReducedVisual = (open: boolean) => {
+              gsap.set([leftShutter, rightShutter], {
+                opacity: open ? 0 : 0.94,
+                xPercent: 0,
+              })
+              gsap.set(pull, { y: 0 })
+              gsap.set(cards, {
+                opacity: open ? 1 : 0,
+                rotation: (index) => cardRotation(index),
+                rotationX: 0,
+                rotationY: 0,
+                x: 0,
+                xPercent: -50,
+                y: 0,
+                yPercent: -50,
+              })
+            }
+
+            timeline.current = null
+            applyReducedVisual.current = setReducedVisual
+            setReducedVisual(isOpen.current)
+
+            return () => {
+              if (applyReducedVisual.current === setReducedVisual) {
+                applyReducedVisual.current = null
+              }
+            }
+          }
+
+          applyReducedVisual.current = null
+          const pullTravel = readCssNumber(
+            zipperOverlay,
+            "--zipper-pull-travel"
+          )
+          const perspectiveTilt = conditions.desktop
+            ? 13
+            : conditions.tablet
+              ? 9
+              : 6
+          const sceneTimeline = gsap.timeline({ paused: true })
 
           sceneTimeline
             .to(
@@ -193,17 +231,26 @@ function HeroZipperScene() {
               },
               0.06
             )
-            .to(
+            .fromTo(
               cards,
+              {
+                opacity: 0,
+                rotation: 0,
+                rotationX: perspectiveTilt,
+                rotationY: (index) => (index % 2 === 0 ? -8 : 8),
+                x: (index) => cardGeometry[index].closedX,
+                xPercent: -50,
+                y: (index) => cardGeometry[index].closedY,
+                yPercent: -50,
+              },
               {
                 x: 0,
                 xPercent: -50,
                 y: 0,
                 yPercent: -50,
-                rotation: (index) =>
-                  shouldReduceMotion ? cardRotation(index) : cardRotation(index) * 1.35,
-                rotationX: shouldReduceMotion ? 0 : -perspectiveTilt * 0.35,
-                rotationY: shouldReduceMotion ? 0 : (index) => (index % 2 === 0 ? 3 : -3),
+                rotation: (index) => cardRotation(index) * 1.35,
+                rotationX: -perspectiveTilt * 0.35,
+                rotationY: (index) => (index % 2 === 0 ? 3 : -3),
                 opacity: 1,
                 duration: 0.5,
                 stagger: 0.055,
@@ -212,27 +259,28 @@ function HeroZipperScene() {
               0.22
             )
 
-          if (!shouldReduceMotion) {
-            sceneTimeline.to(cards, {
-              y: 0,
-              rotation: (index) => cardRotation(index),
-              rotationX: 0,
-              rotationY: 0,
-              duration: 0.18,
-              stagger: 0.035,
-              ease: "power2.out",
-            }, 0.85)
-          }
+          sceneTimeline.to(cards, {
+            y: 0,
+            rotation: (index) => cardRotation(index),
+            rotationX: 0,
+            rotationY: 0,
+            duration: 0.18,
+            stagger: 0.035,
+            ease: "power2.out",
+          }, 0.85)
 
-          const initialVisualProgress = shouldReduceMotion
-            ? isOpen.current
-              ? 1
-              : 0
-            : currentProgress.current
+          timeline.current = sceneTimeline.progress(currentProgress.current).pause()
+          const resizeObserver = new ResizeObserver(() => {
+            const visualProgress = currentProgress.current
 
-          timeline.current = sceneTimeline.progress(initialVisualProgress).pause()
+            cardGeometry = measureCards()
+            sceneTimeline.invalidate().progress(visualProgress).pause()
+          })
+
+          resizeObserver.observe(scene)
 
           return () => {
+            resizeObserver.disconnect()
             settleTween.current?.kill()
             settleTween.current = null
             if (timeline.current === sceneTimeline) {
@@ -246,6 +294,7 @@ function HeroZipperScene() {
       return () => {
         settleTween.current?.kill()
         settleTween.current = null
+        applyReducedVisual.current = null
         media.revert()
       }
     },
@@ -290,19 +339,22 @@ function HeroZipperScene() {
     )
   }
 
-  const handlePointerEnd = (event: React.PointerEvent<HTMLDivElement>) => {
+  const finishPointerGesture = (
+    event: React.PointerEvent<HTMLDivElement>,
+    wasCancelled: boolean
+  ) => {
     if (activePointer.current !== event.pointerId) {
       return
     }
 
     activePointer.current = null
-    const settledProgress = settleZipperProgress(
+    const settledProgress = resolvePointerEndProgress(
       wasOpenAtDragStart.current,
-      currentProgress.current
+      currentProgress.current,
+      wasCancelled
     )
 
-    isOpen.current = settledProgress === 1
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+    if (!wasCancelled && event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
     settleToProgress(settledProgress)
@@ -318,12 +370,19 @@ function HeroZipperScene() {
     event.preventDefault()
     settleTween.current?.kill()
     settleTween.current = null
-    isOpen.current = nextProgress >= 0.5
 
     if (["Home", "End", "Enter", " "].includes(event.key)) {
       settleToProgress(nextProgress as 0 | 1)
     } else {
+      const previousEndpoint = isOpen.current ? 1 : 0
+      const nextEndpoint = getSettledZipperEndpoint(
+        previousEndpoint,
+        nextProgress
+      )
+
+      isOpen.current = nextEndpoint === 1
       updateProgress(nextProgress, true)
+      setRoutesExposed(nextProgress === 1 && nextEndpoint === 1)
     }
   }
 
@@ -349,7 +408,11 @@ function HeroZipperScene() {
           />
         </div>
 
-        <ul className={styles.previewList} aria-label="Example powered API routes">
+        <ul
+          aria-hidden={!routesExposed}
+          aria-label="Example powered API routes"
+          className={styles.previewList}
+        >
           {PREVIEWS.map((preview) => (
             <li key={preview} className={styles.previewCard} data-zipper-card>
               <code>{preview}</code>
@@ -378,11 +441,11 @@ function HeroZipperScene() {
           data-zipper-pull
           onContextMenu={(event) => event.preventDefault()}
           onKeyDown={handleKeyDown}
-          onLostPointerCapture={handlePointerEnd}
-          onPointerCancel={handlePointerEnd}
+          onLostPointerCapture={(event) => finishPointerGesture(event, true)}
+          onPointerCancel={(event) => finishPointerGesture(event, true)}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerEnd}
+          onPointerUp={(event) => finishPointerGesture(event, false)}
           role="slider"
           tabIndex={0}
         >
