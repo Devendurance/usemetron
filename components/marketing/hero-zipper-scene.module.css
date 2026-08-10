@@ -50,6 +50,8 @@
 }
 
 .zipperOverlay {
+  --zipper-origin-offset: 27px;
+  --zipper-pull-travel: 126px;
   position: absolute;
   z-index: 20;
   top: 50%;
@@ -108,14 +110,16 @@
   border: 2px solid var(--metron-ink);
   border-radius: 9999px 9999px 14px 14px;
   background: var(--metron-transaction-gold);
-  transform: translate3d(-50%, 126px, 0);
+  transform: translate3d(-50%, var(--zipper-pull-travel), 0);
   transform-origin: 50% 0;
   will-change: transform;
 }
 
 .zipperOrigin {
   position: absolute;
-  top: calc(7% + 153px);
+  top: calc(
+    7% + var(--zipper-pull-travel) + var(--zipper-origin-offset)
+  );
   left: 50%;
   width: 1px;
   height: 1px;
@@ -190,7 +194,7 @@
   top: 70%;
   border-color: var(--metron-cream);
   background: var(--metron-blueprint);
-  color: var(--metron-cream);
+  color: var(--metron-ink);
 }
 
 .previewCard:nth-child(4) {
@@ -241,17 +245,10 @@
     height: 55%;
   }
 
-  .pull {
-    transform: translate3d(-50%, 100px, 0);
-  }
-
   .zipperOverlay {
+    --zipper-pull-travel: 100px;
     left: min(calc(100% - 33px), calc(50% + 379px));
     height: 70%;
-  }
-
-  .zipperOrigin {
-    top: calc(7% + 127px);
   }
 
   .previewCard {
@@ -304,17 +301,14 @@
   .pull {
     width: 30px;
     height: 46px;
-    transform: translate3d(-50%, 78px, 0);
   }
 
   .zipperOverlay {
+    --zipper-origin-offset: 23px;
+    --zipper-pull-travel: 78px;
     left: calc(100% - 17px);
     width: 36px;
     height: 76%;
-  }
-
-  .zipperOrigin {
-    top: calc(7% + 101px);
   }
 
   .pullGrip {

@@ -34,6 +34,14 @@ function readRotation(card: HTMLElement) {
   )
 }
 
+function readCssNumber(element: Element, property: string) {
+  return (
+    Number.parseFloat(
+      window.getComputedStyle(element).getPropertyValue(property)
+    ) || 0
+  )
+}
+
 function HeroZipperScene() {
   const root = useRef<HTMLDivElement>(null)
 
@@ -49,6 +57,7 @@ function HeroZipperScene() {
       const leftShutter = select('[data-zipper-shutter="left"]')[0]
       const rightShutter = select('[data-zipper-shutter="right"]')[0]
       const pull = select("[data-zipper-pull]")[0]
+      const zipperOverlay = select("[data-zipper-overlay]")[0]
       const zipperOrigin = select("[data-zipper-origin]")[0]
       const cards = select("[data-zipper-card]") as HTMLElement[]
       const media = gsap.matchMedia()
@@ -63,11 +72,10 @@ function HeroZipperScene() {
         (context) => {
           const conditions = context.conditions as SceneConditions
           const reducedMotion = Boolean(conditions.reduceMotion)
-          const pullTravel = conditions.desktop
-            ? 126
-            : conditions.tablet
-              ? 100
-              : 78
+          const pullTravel = readCssNumber(
+            zipperOverlay,
+            "--zipper-pull-travel"
+          )
           const perspectiveTilt = conditions.desktop
             ? 13
             : conditions.tablet
