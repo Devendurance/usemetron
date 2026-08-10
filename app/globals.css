@@ -45,6 +45,7 @@
   --color-blueprint: var(--metron-blueprint);
   --color-route-sky: var(--metron-route-sky);
   --color-transaction-gold: var(--metron-transaction-gold);
+  --color-hero-floor: var(--metron-hero-floor);
   --color-hero-chartreuse: var(--metron-hero-chartreuse);
   --color-settlement-green: var(--metron-settlement-green);
   --color-review-bronze: var(--metron-review-bronze);
@@ -100,6 +101,7 @@
   --metron-blueprint: #2f80ed;
   --metron-route-sky: #5cace0;
   --metron-transaction-gold: #e3a83a;
+  --metron-hero-floor: #c88d36;
   --metron-hero-chartreuse: #d6f24a;
   --metron-settlement-green: #3b6b55;
   --metron-review-bronze: #a46e2a;
@@ -170,6 +172,27 @@
   ::selection {
     background: var(--metron-coral);
     color: var(--metron-ink);
+  }
+}
+
+@layer utilities {
+  .hero-floor-grid {
+    background-image:
+      repeating-linear-gradient(
+        90deg,
+        transparent 0,
+        transparent 76px,
+        var(--metron-ink) 77px,
+        var(--metron-ink) 79px
+      ),
+      repeating-linear-gradient(
+        0deg,
+        transparent 0,
+        transparent 52px,
+        var(--metron-ink) 53px,
+        var(--metron-ink) 55px
+      );
+    transform: perspective(360px) rotateX(56deg);
   }
 }
 

@@ -1,6 +1,6 @@
 # SDD ledger — plan: Metron Frontend UI/UX Foundation (conversation-approved)
 
-Workspace note: this project is not a Git repository, so review gates inspect owned files and command output rather than commit diffs.
+Historical workspace note: when this UI foundation work was authored, the project was treated as a non-Git workspace, so its review gates inspected owned files and command output rather than commit diffs. The current workspace may now be Git-backed; this note is not a product or implementation claim.
 
 Task 1A: complete (review quality approved; CLI rejected `base-nova` input but supported `nova` produced the required `style: base-nova`; semantic EmptyDescription minor carried into Task 1B)
 

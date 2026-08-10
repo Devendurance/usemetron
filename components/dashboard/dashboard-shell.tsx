@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation"
 import { useState } from "react"
 
 import { BrandMark } from "@/components/metron"
+import { MetronAccountBadge } from "@/components/auth/connect-button"
 import { Button } from "@/components/ui/button"
 import {
   Sheet,
@@ -16,7 +17,9 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet"
+import { useAuth } from "@/lib/auth/use-auth"
 import { cn } from "@/lib/utils"
+import { formatWalletAddress } from "@/lib/web3/format"
 
 const navigation = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
@@ -72,6 +75,45 @@ function NavLinks({
   )
 }
 
+/**
+ * Sidebar wallet card driven by the real auth state: title reflects the
+ * session, the badge shows the connect button or authenticated address chip,
+ * and the address line appears once authenticated.
+ */
+function WalletStatusCard() {
+  const { status, developer } = useAuth()
+
+  const title =
+    status === "loading"
+      ? "Checking session…"
+      : status === "authenticated"
+        ? "Authenticated"
+        : "Connect your wallet"
+
+  return (
+    <div className="mt-auto hidden space-y-3 rounded-card bg-coral p-5 min-[1024px]:block">
+      <WalletCards className="size-5" aria-hidden="true" />
+      <div>
+        <p className="font-heading text-base font-semibold">{title}</p>
+        <div className="mt-2">
+          <MetronAccountBadge />
+        </div>
+        {status === "authenticated" && developer !== null && (
+          <p className="mt-2 font-metadata text-xs font-bold tracking-[0.04em] text-muted-ink">
+            {formatWalletAddress(developer.walletAddress)}
+          </p>
+        )}
+      </div>
+      <Link
+        href="/dashboard/settings"
+        className="inline-flex min-h-11 items-center text-sm font-bold underline underline-offset-4 focus-visible:shadow-focus focus-visible:outline-none"
+      >
+        Open settings
+      </Link>
+    </div>
+  )
+}
+
 function DashboardShell({ children }: { children: React.ReactNode }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
@@ -90,21 +132,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
           <div className="min-[1024px]:hidden"><NavLinks compact /></div>
           <div className="hidden min-[1024px]:block"><NavLinks /></div>
         </div>
-        <div className="mt-auto hidden space-y-3 rounded-card bg-coral p-5 min-[1024px]:block">
-          <WalletCards className="size-5" aria-hidden="true" />
-          <div>
-            <p className="font-heading text-base font-semibold">Wallet not connected</p>
-            <p className="mt-1 text-sm leading-relaxed text-muted-ink">
-              Connect a wallet in Settings when the integration is available.
-            </p>
-          </div>
-          <Link
-            href="/dashboard/settings"
-            className="inline-flex min-h-11 items-center text-sm font-bold underline underline-offset-4 focus-visible:shadow-focus focus-visible:outline-none"
-          >
-            Open settings
-          </Link>
-        </div>
+        <WalletStatusCard />
       </aside>
 
       <header className="sticky top-0 z-20 flex min-h-16 items-center justify-between border-b-2 border-ink bg-mobile-yellow px-4 min-[600px]:hidden">

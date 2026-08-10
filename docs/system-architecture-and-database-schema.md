@@ -1,290 +1,383 @@
-# Metron: System Architecture and Database Schema
+# Metron System Architecture and Database Schema
 
-This document outlines the system architecture and database schema for **Metron**, a zero-code x402 payment gateway for APIs on Celo. It is designed to be comprehensive and implementation-ready for coding agents.
+> **Status:** Target architecture. It is implementation-ready guidance, not a description of deployed behavior. The current repository has a UI shell and presentation previews only.
 
----
+## 1. Current implementation boundary
 
-## 1. System Overview
+Inspection of the repository shows:
 
-Metron acts as a reverse proxy gateway that sits between API consumers (human callers or AI agents) and upstream developer APIs. It enforces a pay-per-request model using the Celo x402 protocol, ensuring that every request is paid for with stablecoins (USDC) before being forwarded to the upstream service.
+- Landing, dashboard, endpoint, settings, transaction, and proxy presentation pages.
+- Local state selectors and empty states that explicitly avoid real payment claims.
+- No production API route handlers.
+- No PostgreSQL/Supabase schema, migrations, or transaction persistence.
+- No Redis/Upstash integration.
+- No wallet authentication or session provider.
+- No x402 facilitator client or Celo Mainnet provider.
+- No USDC payment integration, `payTo` routing, attribution runtime, or transaction evidence ingestion.
 
-### 4 System Layers
-1. **Client Layer:** AI agents, automated scripts, or end-users initiating HTTP requests to Metron-powered proxy URLs.
-2. **Metron Gateway:** The core system (Next.js App Router). It handles routing, 402 Payment Required challenges, payment verification via x402, rate limiting, request metering, and proxying to the upstream API.
-3. **Celo Blockchain Layer:** Facilitates the actual settlement of funds via Celo's x402 facilitator and on-chain transactions, optionally tracking attribution via ERC-8021 tags.
-4. **Data Layer:** Persistent storage (PostgreSQL via Supabase) for configurations, user accounts, and transaction records, alongside a fast cache (Redis via Upstash) for nonces and rate limiting.
+The current `app/p/[...proxy]/page.tsx` renders a presentation preview. It is not a payment gateway and must not be described or reused as one without a separate production route boundary.
 
-### Component List with Responsibilities
-- **Metron Dashboard:** A frontend interface for developers to authenticate (wallet connection), configure API endpoints, set pricing, and view earnings.
-- **Gateway Proxy Handler:** A catch-all API route that intercepts traffic, challenges unpaid requests, verifies paid requests, and forwards traffic.
-- **Nonce Manager:** Tracks request nonces in Redis to prevent replay attacks.
-- **Payment Verifier:** Communicates with the Celo x402 facilitator to verify off-chain signatures and on-chain settlements.
-- **Database Client (Drizzle):** Interacts with PostgreSQL to store route configs and log successful/failed transactions.
+No fake transaction, mock earnings, fake API data, or runtime fallback verifier is acceptable in production.
 
----
+## 2. Canonical production constants
 
-## 2. Tech Stack
+| Field | Value |
+|---|---|
+| Network | Celo Mainnet |
+| Chain ID | `42220` |
+| CAIP-2 network | `eip155:42220` |
+| Primary token | USDC |
+| USDC decimals | `6` |
+| USDC address | `0xcEBA9300f2b948710d2653dD7B07f33A8B32118C` |
+| x402 version | V2 |
+| Scheme | `exact` |
+| Dashboard | `https://x402.celo.org` |
+| Production facilitator API | `https://api.x402.celo.org` |
 
-- **Framework:** Next.js 15 (App Router) for frontend, API routes, and the proxy handler.
-- **Language:** TypeScript throughout.
-- **Persistence:** Drizzle ORM + PostgreSQL (Supabase).
-- **Caching & Ephemeral State:** Redis (Upstash) for caching, nonces, and rate limiting.
-- **Wallet & Web3:** Wagmi + Viem + RainbowKit for Celo wallet connection.
-- **Payment Protocol:** Celo x402 facilitator API (`x402.celo.org`).
-- **Attribution:** `@celo/attribution-tags` (ERC-8021).
-- **UI:** Shadcn UI + Tailwind CSS for the developer dashboard.
+Use integer USDC base units. Amounts should be strings at JSON and x402 boundaries and integer-compatible values in PostgreSQL. Floating point must not be used for payment amounts, pricing comparisons, earnings, or settlement accounting.
 
----
+Canonical x402 V2 headers:
 
-## 3. Architecture Diagrams
+- `PAYMENT-REQUIRED`: server to caller on an HTTP `402 Payment Required` response.
+- `PAYMENT-SIGNATURE`: caller to server on the signed retry.
+- `PAYMENT-RESPONSE`: server to caller with the settlement response.
 
-### 3a. System Layers
+`X-PAYMENT`, `X-Payment`, and `X-PAYMENT-RECEIPT` are legacy compatibility names only when a separately scoped migration path requires them. They are not canonical.
+
+Each V2 header value is Base64-encoded JSON: `PaymentRequired`, `PaymentPayload`, or `SettlementResponse`, matching the header direction above. The Celo Mainnet USDC price object must use an integer string amount, the canonical asset address, and `extra: { name: "USDC", version: "2" }` for the EIP-712 domain.
+
+## 3. System responsibilities
+
+Metron separates five responsibilities:
+
+1. **Authorization:** The caller signs an x402 payment authorization.
+2. **Verification:** Metron asks the facilitator whether the authorization satisfies the route requirements.
+3. **Execution:** Metron calls the configured upstream after verification.
+4. **Settlement:** Metron asks the facilitator to settle according to the selected policy.
+5. **Delivery:** Metron returns the upstream resource and the actual `PAYMENT-RESPONSE`.
+
+The current product target is a reverse proxy around callable APIs. It is not yet a live payment system.
+
+## 4. Target architecture layers
+
+### Client layer
+
+Human callers, external applications, and AI agents request a powered route. They must be able to parse x402 V2 headers without a dashboard account.
+
+### Metron application layer
+
+- **Dashboard:** Route configuration, wallet identity, and receipt views. It must never hold `X402_API_KEY`.
+- **Identity boundary:** Wallet signature verification and owner-scoped sessions.
+- **Route service:** Persistent endpoint policies and SSRF validation.
+- **Gateway handler:** x402 challenge, signed retry, verification, upstream execution, settlement policy, and delivery.
+- **Facilitator client:** Server-only requests to the Celo facilitator API.
+- **Receipt service:** Idempotent lifecycle and evidence persistence.
+
+### Celo and facilitator layer
+
+The Celo hosted facilitator API validates and settles x402 V2 payments. Settlement is submitted to Celo Mainnet by the facilitator according to its service behavior.
+
+### Data layer
+
+- PostgreSQL/Supabase: persistent source of truth.
+- Redis/Upstash: ephemeral nonce/replay locks, rate limits, route cache, and auth/session nonces.
+
+## 5. Target system diagram
 
 ```mermaid
 flowchart TD
-    Client[Client / AI Agent] --> Gateway[Metron Gateway]
-    Client -.-> Dashboard[Metron Dashboard]
-    
-    Gateway --> Upstream[Upstream API]
-    Gateway --> DataLayer[(Data Layer: Postgres + Redis)]
-    Gateway --> Celo[Celo x402 Facilitator]
-    
-    Dashboard --> DataLayer
-    Celo -.-> Blockchain[(Celo Blockchain)]
+  Caller[Caller or AI Agent] --> Gateway[Metron Gateway]
+  Creator[Creator Dashboard] --> Identity[Wallet Identity]
+  Identity --> Routes[Route Service]
+  Gateway --> Routes
+  Gateway --> Verify[Facilitator Client]
+  Gateway --> Upstream[Configured Upstream API]
+  Gateway --> Receipts[Receipt Service]
+  Routes --> Postgres[(PostgreSQL / Supabase)]
+  Receipts --> Postgres
+  Gateway --> Redis[(Redis / Upstash)]
+  Identity --> Redis
+  Verify --> Facilitator[api.x402.celo.org]
+  Facilitator --> Mainnet[Celo Mainnet]
 ```
 
-### 3b. Gateway Request Flow
+## 6. Canonical gateway flow
 
 ```mermaid
 flowchart TD
-    Ingress((Request Ingress)) --> Auth{Has x402 Header?}
-    Auth -- No --> Challenge[402 Challenge]
-    Auth -- Yes --> Verify[Verify Payment]
-    
-    Verify -- Invalid --> Reject[402 Challenge]
-    Verify -- Valid --> RateLimit[Rate Limit Check]
-    
-    RateLimit -- Pass --> Proxy[Proxy to Upstream]
-    RateLimit -- Fail --> 429[429 Too Many Requests]
-    
-    Proxy --> ResponseCheck{Response OK?}
-    ResponseCheck -- Yes --> Settle[Settle Payment]
-    ResponseCheck -- No --> Refund[Refund / Reject]
-    
-    Settle --> Meter[Meter & Log]
-    Refund --> Meter
-    Meter --> Respond((Respond to Client))
+  Ingress[Request to powered route] --> HasSignature{PAYMENT-SIGNATURE present?}
+  HasSignature -- No --> Requirement[Build exact Mainnet USDC requirements]
+  Requirement --> Challenge[HTTP 402 + PAYMENT-REQUIRED]
+  HasSignature -- Yes --> Parse[Parse x402 V2 payload]
+  Parse --> Verify[POST /verify]
+  Verify -- Invalid --> Reject[Reject without upstream or settlement]
+  Verify -- Valid --> Lock[Acquire Redis replay lock]
+  Lock -- Replayed --> Replay[Reject replay]
+  Lock -- Fresh --> Execute[Execute upstream work]
+  Execute -- Failure --> UpstreamFailed[UPSTREAM_FAILED; do not settle]
+  Execute -- Success --> Settle[POST /settle with server key]
+  Settle -- Failure --> SettlementFailed[SETTLEMENT_FAILED]
+  Settle -- Success --> Record[Persist SETTLED and evidence]
+  Record --> Deliver[Return resource + PAYMENT-RESPONSE]
 ```
 
-### 3c. Sequence Diagram (Hot Path)
+If upstream work fails before settlement, the attempt is aborted and non-settled. This architecture does not claim an automatic refund or reversal. Any future recovery mechanism must be implemented, persisted, and separately documented.
+
+### Sequence
 
 ```mermaid
 sequenceDiagram
-    participant Agent
-    participant Gateway
-    participant Redis
-    participant x402 as x402.celo.org
-    participant Upstream
-    
-    Agent->>Gateway: GET /p/slug/data (No Auth)
-    Gateway-->>Agent: 402 Payment Required (Challenge)
-    
-    Agent->>Gateway: GET /p/slug/data (x402 Headers)
-    Gateway->>Redis: Check Nonce & Rate Limit
-    Redis-->>Gateway: OK
-    
-    Gateway->>x402: POST /verify (Signature)
-    x402-->>Gateway: Valid
-    
-    Gateway->>Upstream: GET /data
-    Upstream-->>Gateway: 200 OK
-    
-    Gateway->>x402: POST /settle
-    x402-->>Gateway: Settled (txHash)
-    Gateway-->>Agent: 200 OK + Data
+  participant Caller
+  participant Gateway as Metron Gateway
+  participant Redis
+  participant Facilitator as api.x402.celo.org
+  participant Upstream
+  participant DB as PostgreSQL
+
+  Caller->>Gateway: Request resource
+  Gateway-->>Caller: 402 + PAYMENT-REQUIRED
+  Caller->>Caller: Sign exact payment authorization
+  Caller->>Gateway: Retry + PAYMENT-SIGNATURE
+  Gateway->>Facilitator: POST /verify
+  Facilitator-->>Gateway: Verification result
+  Gateway->>Redis: Acquire one-use replay lock
+  Gateway->>DB: Persist VERIFIED
+  Gateway->>Upstream: Execute request
+  Upstream-->>Gateway: Response or failure
+  alt Upstream failure
+    Gateway->>DB: Persist UPSTREAM_FAILED
+    Gateway-->>Caller: Aborted, non-settled error
+  else Upstream success
+    Gateway->>Facilitator: POST /settle + server X402_API_KEY
+    Facilitator-->>Gateway: Settlement result and tx hash when available
+    alt Settlement success
+      Gateway->>DB: Persist SETTLED and evidence
+      Gateway-->>Caller: Resource + PAYMENT-RESPONSE
+    else Settlement failure
+      Gateway->>DB: Persist SETTLEMENT_FAILED
+      Gateway-->>Caller: Payment response with settlement failure
+    end
+  end
 ```
 
-### 3d. Developer Onboarding Flow
+## 7. Facilitator integration
 
-```mermaid
-flowchart LR
-    Connect[Connect Wallet] --> URL[Paste Upstream URL]
-    URL --> Price[Set Price (USDC)]
-    Price --> Deploy[Deploy Route]
-    Deploy --> SDK[Get Proxy URL & Snippets]
-```
+The hosts are deliberately separate:
 
----
+- `https://x402.celo.org` is the human-facing dashboard.
+- `https://api.x402.celo.org` is the production backend API.
 
-## 4. Project File Structure
+Never use the dashboard as a backend API host.
+
+Target endpoints:
+
+| Method | Path | Auth | Role |
+|---|---|---|---|
+| `GET` | `/supported` | Open | Confirm supported network and scheme pairs. |
+| `GET` | `/health` | Open | Liveness check. |
+| `POST` | `/verify` | Open | Verify the signed payment payload and requirements. |
+| `POST` | `/settle` | Server-side `X402_API_KEY` sent as `X-API-Key` | Submit the payment authorization for settlement. |
+
+Important operational rule: `/verify` alone does not prove that settlement is configured. A deployment must test `/settle` separately with a server-side `X402_API_KEY` sent as `X-API-Key`. The key must never be exposed to browser code, callers, logs, or client-visible errors.
+
+The target payment requirements must use `scheme: "exact"`, `network: "eip155:42220"`, USDC's exact Mainnet address, integer `amount`, and the destination selected by the `payTo` decision.
+
+## 8. Target project boundaries
+
+These paths describe future implementation boundaries; they do not imply that the files currently exist.
 
 ```text
 app/
-  layout.tsx
-  page.tsx                    — Landing page
-  dashboard/
-    layout.tsx                — Dashboard layout (authenticated)
-    page.tsx                  — Overview/stats
-    endpoints/
-      page.tsx                — List endpoints
-      new/
-        page.tsx              — Create new endpoint
-      [id]/
-        page.tsx              — Endpoint detail + analytics
-    transactions/
-      page.tsx                — Transaction history
-    settings/
-      page.tsx                — Wallet & account settings
   api/
-    endpoints/
-      route.ts                — CRUD for endpoints
-      [id]/
-        route.ts              — Single endpoint operations
-    transactions/
-      route.ts                — List transactions
-    stats/
-      route.ts                — Earnings summary
-  p/
-    [...proxy]/
-      route.ts                — THE PROXY GATEWAY (catch-all)
+    auth/                    -- wallet nonce and session boundary
+    endpoints/               -- authenticated route configuration
+    transactions/            -- persisted receipt queries
+    stats/                   -- derived real metrics
+  p/[...proxy]/route.ts      -- production gateway handler
 lib/
-  db/
-    schema.ts                 — Drizzle schema definitions
-    index.ts                  — Drizzle client
-    migrations/               — Generated migrations
-  x402/
-    client.ts                 — x402.celo.org facilitator client
-    verify.ts                 — Payment verification logic
-    settle.ts                 — Settlement logic
-    challenge.ts              — 402 challenge response builder
-  gateway/
-    proxy.ts                  — Upstream proxy forwarding
-    nonce.ts                  — Nonce management (Redis)
-    meter.ts                  — Request metering & logging
-    rate-limit.ts             — Rate limiting
-  attribution/
-    tags.ts                   — @celo/attribution-tags wrapper
-  wallet/
-    config.ts                 — Wagmi + Celo chain config
-  utils/
-    crypto.ts                 — Signature helpers
-    errors.ts                 — Error types
-    sdk-generator.ts          — Generate SDK snippets
+  db/                        -- PostgreSQL client, schema, migrations
+  redis/                     -- ephemeral locks, rate limits, cache
+  x402/                      -- server-only facilitator client and codecs
+  gateway/                   -- policy, upstream, lifecycle orchestration
+  wallet/                    -- signature and session verification
+  attribution/               -- direct-transaction evidence only
 components/
-  ui/                         — Shadcn components
-  dashboard/
-    stats-cards.tsx
-    transaction-table.tsx
-    endpoint-card.tsx
-    endpoint-form.tsx
-    earnings-chart.tsx
-  wallet/
-    connect-button.tsx
-  proxy/
-    sdk-snippet.tsx
+  dashboard/                 -- existing shell wired to real APIs later
+  proxy/                     -- receipt/state presentation fed by evidence
 ```
 
----
+The implementation must preserve the existing UI language from `DESIGN.md` while keeping preview components separate from payment execution code.
 
-## 5. Database Schema (Drizzle ORM)
+## 9. Database schema target
 
-The `nonces` table is optionally defined here, but for production, nonces should primarily reside in Redis (Upstash) with a TTL to reduce database write load. Tracking nonces in PostgreSQL is provided as a fallback/audit mechanism.
+PostgreSQL/Supabase is persistent state. The schema below is a target model and is not present in the repository yet. When it is implemented, generate and apply Drizzle migrations; never use `drizzle push`.
 
-**File:** `lib/db/schema.ts`
+### `developers`
 
-```typescript
-import { pgTable, text, timestamp, boolean, bigint, integer, uuid, uniqueIndex } from 'drizzle-orm/pg-core';
-import { sql } from 'drizzle-orm';
+| Column | Type/constraint | Purpose |
+|---|---|---|
+| `id` | UUID primary key | Internal creator identity. |
+| `wallet_address` | Text, normalized unique | Authenticated wallet identity. |
+| `created_at` | Timestamp | Creation evidence. |
+| `updated_at` | Timestamp | Last identity change. |
 
-export const developers = pgTable('developers', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  walletAddress: text('wallet_address').notNull().unique(),
-  displayName: text('display_name'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
+Do not treat this wallet as the settlement destination unless the `payTo` decision selects and implements that behavior.
 
-export const proxyRoutes = pgTable('proxy_routes', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  developerId: uuid('developer_id').references(() => developers.id).notNull(),
-  upstreamUrl: text('upstream_url').notNull(),
-  slug: text('slug').notNull().unique(),
-  pricingModel: text('pricing_model').default('flat').notNull(), // 'flat', 'per_token', 'tiered'
-  priceMicroUsdc: bigint('price_micro_usdc', { mode: 'number' }).notNull(),
-  allowedTokens: text('allowed_tokens').array().default(sql`ARRAY['USDC']::text[]`).notNull(),
-  isActive: boolean('is_active').default(true).notNull(),
-  description: text('description'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
+### `proxy_routes`
 
-export const transactions = pgTable('transactions', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  routeId: uuid('route_id').references(() => proxyRoutes.id).notNull(),
-  callerWallet: text('caller_wallet').notNull(),
-  amountMicroUsdc: bigint('amount_micro_usdc', { mode: 'number' }).notNull(),
-  token: text('token').notNull(),
-  txHash: text('tx_hash'),
-  status: text('status').notNull(), // 'verified', 'settle_pending', 'settled', 'refunded', 'failed'
-  upstreamStatusCode: integer('upstream_status_code'),
-  latencyMs: integer('latency_ms'),
-  attributionTag: text('attribution_tag'),
-  nonce: text('nonce').notNull(),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-});
+| Column | Type/constraint | Purpose |
+|---|---|---|
+| `id` | UUID primary key | Route identity. |
+| `developer_id` | UUID foreign key | Owner scope. |
+| `slug` | Text unique | Public route reference. |
+| `upstream_url` | Text | Validated target endpoint. |
+| `amount_base_units` | Bigint, not null | Integer USDC amount. |
+| `asset_address` | Text, not null | Canonical Mainnet USDC address. |
+| `network` | Text, not null | `eip155:42220`. |
+| `scheme` | Text, not null | `exact`. |
+| `pay_to` | Text, not null after policy selection | Settlement destination. |
+| `is_active` | Boolean | Route availability. |
+| `created_at` | Timestamp | Route creation. |
+| `updated_at` | Timestamp | Last policy change. |
 
-// Note: Redis is preferred for nonces due to high write-throughput and automatic TTL.
-// This table is for fallback/audit purposes if Redis is not strictly enforced.
-export const nonces = pgTable('nonces', {
-  nonce: text('nonce').primaryKey(),
-  callerWallet: text('caller_wallet').notNull(),
-  usedAt: timestamp('used_at').defaultNow().notNull(),
-  expiresAt: timestamp('expires_at').notNull(),
-});
-```
+### `transactions`
 
----
+This table records a call/payment attempt and its evidence. It must not be populated by a UI preview.
 
-## 6. External Service Integration
+| Column | Type/constraint | Purpose |
+|---|---|---|
+| `id` | UUID primary key | Call/payment attempt identity. |
+| `route_id` | UUID foreign key | Route used. |
+| `caller_wallet` | Text nullable until verified | Payer identity from the verified payload. |
+| `amount_base_units` | Bigint, not null | Integer payment amount. |
+| `asset_address` | Text, not null | Payment asset. |
+| `network` | Text, not null | Payment network. |
+| `scheme` | Text, not null | x402 scheme. |
+| `pay_to` | Text, not null | Destination used by the requirement. |
+| `nonce` | Text nullable/audit value | Correlation value; replay enforcement lives in Redis. |
+| `status` | Controlled text value | Lifecycle state. |
+| `upstream_status_code` | Integer nullable | Upstream result. |
+| `tx_hash` | Text nullable | Real Celo transaction hash when available. |
+| `facilitator_response` | JSONB nullable | Sanitized response evidence. |
+| `failure_reason` | Text nullable | Operator-readable failure. |
+| `verified_at` | Timestamp nullable | Verification evidence. |
+| `settled_at` | Timestamp nullable | Settlement evidence. |
+| `created_at` | Timestamp | Attempt creation. |
+| `updated_at` | Timestamp | Last lifecycle update. |
 
-### x402.celo.org Facilitator
-The core integration handling Celo stablecoin micropayments.
-- **POST `/verify`**: Called by the gateway proxy handler before forwarding the request. Checks if the provided cryptographic signature and headers match the requested payment conditions.
-- **POST `/settle`**: Called *after* a successful upstream response (HTTP 20x). Instructs the facilitator to execute the on-chain settlement, moving funds from the caller to the developer.
-- **GET `/supported`**: Used by the dashboard to show available chains and tokens (e.g., Celo, USDC).
-- **Error Handling**: Network failures on `/settle` enqueue the settlement for retry. If `/verify` fails, the gateway responds with `402 Payment Required` or `401 Unauthorized`.
+Required lifecycle values:
 
-### @celo/attribution-tags (ERC-8021)
-Transactions pushed to the network (via settlement) include specific calldata tags to track volume for the hackathon and ecosystem metrics. 
-- Integrated in the `lib/attribution/tags.ts` wrapper.
-- Extracted tags are logged in the `transactions.attributionTag` field.
+- `PAYMENT_REQUIRED`
+- `VERIFIED`
+- `UPSTREAM_FAILED`
+- `SETTLEMENT_FAILED`
+- `SETTLED`
 
-### Redis (Upstash)
-- **Nonce Tracking:** Redis `SETNX` (Set if Not eXists) with an expiration (TTL of 5-15 minutes) is used to prevent replay attacks of x402 payment headers.
-- **Route Config Caching:** Database queries for `proxyRoutes` based on the URL `slug` are cached to ensure sub-millisecond latency for the proxy hot path.
-- **Rate Limiting:** IP and wallet-based sliding window rate limit counters to protect the proxy from abuse.
+An implementation may add states such as `DELIVERY_FAILED` or `RECONCILIATION_REQUIRED`, but it must preserve the distinction between verification and settlement.
 
----
+There is no requirement for a persistent `nonces` table in the hot path. Redis owns the short-lived replay lock; PostgreSQL may retain the nonce as audit metadata after a record exists.
 
-## 7. Security Considerations
+## 10. Redis responsibilities
 
-- **Nonce Replay Protection:** A strictly enforced Redis cache logs every processed nonce. If a request arrives with an already seen nonce, it is immediately rejected with a 401/402.
-- **Upstream URL Validation (SSRF Prevention):** The dashboard enforces strict URL validation when creating routes. Internal IP addresses, localhost, and non-HTTP(S) protocols are explicitly blocked.
-- **Rate Limiting Strategy:** Rate limits apply at two levels: IP-based (general abuse) and wallet-based (payment spam).
-- **Wallet Authentication for Dashboard:** Developer login utilizes SIWE (Sign-In with Ethereum/Celo) to issue secure session cookies for dashboard API routes, ensuring they only manage routes they own.
+Redis/Upstash is ephemeral support infrastructure, not the persistent source of truth.
 
----
+Allowed uses:
 
-## 8. Error Handling Matrix
+- Atomic nonce/replay lock with a bounded TTL.
+- Wallet-auth/session nonce with expiration.
+- IP, wallet, route, and facilitator rate-limit counters.
+- Route configuration cache with explicit invalidation.
+- Short-lived request correlation or idempotency locks.
 
-| Scenario | HTTP Status | Settlement | User Message |
-|----------|-------------|------------|--------------|
-| Missing x402 Headers | `402 Payment Required` | None | `"Payment required. See WWW-Authenticate headers."` |
-| Invalid/Expired Signature | `401 Unauthorized` | None | `"Invalid or expired payment signature."` |
-| Nonce Reused (Replay) | `401 Unauthorized` | None | `"Nonce already used. Generate a new payment."` |
-| Route Slug Not Found | `404 Not Found` | None | `"API endpoint not found."` |
-| Rate Limit Exceeded | `429 Too Many Requests`| None | `"Too many requests. Please slow down."` |
-| Upstream 5xx Error | `502 Bad Gateway` | Refund/Abort | `"Upstream API error. Payment aborted."` |
-| Upstream Timeout | `504 Gateway Timeout` | Refund/Abort | `"Upstream API timed out. Payment aborted."` |
-| Settlement Network Error | `200 OK` (Async) | Retry Queue| N/A (Response sent, settlement retried in background) |
-| Successful Request | `200 OK` | Settled | (Upstream Response Body) |
+Do not use Redis as the only record of settlement, earnings, transaction hash, route ownership, or hackathon evidence.
+
+## 11. API and data flow rules
+
+### Unpaid request
+
+1. Resolve an active route.
+2. Construct the exact Mainnet USDC requirements.
+3. Persist or correlate a `PAYMENT_REQUIRED` attempt without inventing a transaction.
+4. Return HTTP `402 Payment Required` and `PAYMENT-REQUIRED`.
+
+### Signed retry
+
+1. Parse `PAYMENT-SIGNATURE` as x402 V2.
+2. Verify the payload against the route policy through `/verify`.
+3. Acquire the Redis replay lock atomically.
+4. Persist `VERIFIED` only after the facilitator confirms verification.
+
+### Upstream and settlement
+
+1. Execute upstream work only after verification and replay protection.
+2. If upstream fails, persist `UPSTREAM_FAILED`, do not call `/settle`, and return an aborted/non-settled result.
+3. If upstream succeeds, call `/settle` with the server key according to policy.
+4. Persist `SETTLED` only after a successful facilitator response and retain `tx_hash` when available.
+5. Persist `SETTLEMENT_FAILED` when settlement does not complete; never report it as settled.
+6. Return `PAYMENT-RESPONSE` containing the actual settlement result.
+
+## 12. Security requirements
+
+- Validate and constrain every upstream URL to prevent SSRF.
+- Block localhost, private address ranges, metadata endpoints, redirects to blocked targets, and unsupported protocols.
+- Enforce one-use payment nonces with atomic Redis operations.
+- Bind route management to an authenticated wallet session.
+- Keep `X402_API_KEY` and provider credentials server-only.
+- Redact signed payloads, tokens, cookies, and upstream secrets from logs.
+- Bound upstream request/response size and execution time.
+- Rate-limit verification and settlement calls.
+- Make transaction persistence and facilitator retries idempotent.
+- Do not treat a facilitator health check or `/verify` response as settlement proof.
+- Do not add a mock or fallback verifier to production paths.
+
+## 13. Error and lifecycle matrix
+
+| Scenario | Target HTTP result | Lifecycle | Settlement |
+|---|---|---|---|
+| Route not found/inactive | `404` | No payment attempt or rejected attempt | None |
+| Missing payment signature | `402` + `PAYMENT-REQUIRED` | `PAYMENT_REQUIRED` | None |
+| Malformed/invalid signature | Payment rejection | No `VERIFIED` state | None |
+| Replayed authorization | Payment rejection | Rejected replay | None |
+| Facilitator verification unavailable | Gateway error | Verification failure | None |
+| Upstream failure before settlement | Upstream/gateway error | `UPSTREAM_FAILED` | Do not call `/settle` |
+| Facilitator settlement failure | Gateway error | `SETTLEMENT_FAILED` | Not settled |
+| Successful settlement | Upstream response with `PAYMENT-RESPONSE` | `SETTLED` | Real settlement evidence |
+
+The exact status code and body for each rejection must be tested against the chosen x402 server implementation. No error message may claim a refund or reversal unless that behavior is implemented and evidenced.
+
+## 14. Attribution and hackathon evidence
+
+Registered project details:
+
+| Field | Value |
+|---|---|
+| Project | Metron |
+| Repository | [Devendurance/usemetron](https://github.com/Devendurance/usemetron) |
+| Builder | Endurance Udoh |
+| Assigned tag | `celo_91fed90b97fc` |
+| Registered agent/payTo wallet | `0x21E5Fc03E4305CC8CFb874253c6d66A8bdB0bcDa` |
+
+### Track 2
+
+Track 2 is the count of successful Celo Mainnet x402 settlements. Wallet attribution is through the submitted agent/payTo wallet: settlements to or from that registered wallet are attributable only when the wallet actually participates in the settlement path. The hackathon FAQ says the facilitator relayer cannot carry Metron's tag. Therefore do not require the tag, claim every facilitator settlement carries it, or send tagged mirror transactions.
+
+### Track 1
+
+Track 1 is eligible volume from genuine direct transactions sent by Metron and carrying `celo_91fed90b97fc`. Preserve existing codes with the supported multi-code form and retain transaction hashes. Do not invent volume, self-transfer, wash, or sybil activity. Hosted facilitator Builder Code/ERC-8021 support is **REQUIRES OFFICIAL CONFIRMATION**.
+
+## 15. Open architecture decisions
+
+- **`payTo` routing:** Creator-direct, registered agent wallet, or another configured destination. **REQUIRES IMPLEMENTATION DECISION.**
+- **Settlement/delivery order:** The target sequence is upstream work, settlement according to policy, then resource plus `PAYMENT-RESPONSE`; exact failure semantics must be implemented. **REQUIRES IMPLEMENTATION DECISION.**
+- **Settlement reconciliation:** Retry, operator review, and evidence repair for `SETTLEMENT_FAILED`. **REQUIRES IMPLEMENTATION DECISION.**
+- **Hosted facilitator attribution:** Builder Code/ERC-8021 support for Track 1. **REQUIRES OFFICIAL CONFIRMATION.**
+
+## References
+
+- [Celo x402](https://docs.celo.org/build-on-celo/build-with-ai/x402)
+- [Celo network overview](https://docs.celo.org/build-on-celo/network-overview)
+- [Celo stablecoin contracts](https://docs.celo.org/tooling/contracts/stablecoin-contracts)
+- [x402 HTTP 402 and V2 headers](https://docs.x402.org/core-concepts/http-402)
+- [x402 Builder Code extension](https://docs.x402.org/extensions/builder-code)
+- [Celo Builders FAQ](https://celobuilders.xyz/hackathons/agentic-payments-defai/faqs)
+- [Celo Builders tracks](https://celobuilders.xyz/hackathons/agentic-payments-defai/tracks)

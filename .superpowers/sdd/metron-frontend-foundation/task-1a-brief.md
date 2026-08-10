@@ -1,6 +1,6 @@
 # Task 1A — Mechanical shadcn setup
 
-Work in `C:\Users\USER\Documents\ideas\celo-agentic-hack`. This is not a Git repository; do not commit.
+Work in `C:\Users\USER\Documents\ideas\celo-agentic-hack`. At the time this historical brief was authored, the workspace was treated as non-Git; do not commit as part of this task.
 
 1. Read `AGENTS.md`.
 2. Run exactly this non-interactive initialization from the project root:

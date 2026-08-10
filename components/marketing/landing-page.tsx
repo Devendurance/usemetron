@@ -1,5 +1,4 @@
 import {
-  ArrowRight,
   Braces,
   CircleDollarSign,
   Globe2,
@@ -12,8 +11,8 @@ import {
 import Link from "next/link"
 
 import { CallLine, MetronReceipt } from "@/components/metron"
+import { AuthCta } from "@/components/auth/auth-cta"
 
-import { CtaLink } from "./cta-link"
 import { HeroSection } from "./hero-section"
 import { MarketingHeader } from "./marketing-header"
 
@@ -47,7 +46,9 @@ const publishingSteps = [
 function LandingPage() {
   return (
     <div className="min-h-screen overflow-x-clip bg-cream text-ink">
-      <MarketingHeader />
+      <div className="bg-route-sky">
+        <MarketingHeader />
+      </div>
       <main>
         <HeroSection />
 
@@ -95,13 +96,11 @@ function LandingPage() {
               per-request payments without building keys, billing dashboards,
               subscriptions or payout infrastructure.
             </p>
-            <Link
-              className="mt-8 inline-flex min-h-11 items-center text-sm font-bold text-ink underline decoration-2 decoration-blueprint underline-offset-4 transition-colors hover:decoration-ink focus-visible:outline-none focus-visible:shadow-focus motion-reduce:transition-none"
-              href="/dashboard/endpoints/new"
-              prefetch={false}
-            >
-              Publish an API
-            </Link>
+            <AuthCta
+              variant="lime"
+              href="/dashboard"
+              className="mt-8"
+            />
           </article>
 
           <article
@@ -293,15 +292,11 @@ function LandingPage() {
                 per request on Celo.
               </p>
             </div>
-            <CtaLink
-              href="/dashboard/endpoints/new"
-              prefetch={false}
-              variant="secondary"
+            <AuthCta
+              variant="paper"
+              href="/dashboard"
               className="mt-8 shrink-0 lg:mt-0"
-            >
-              Publish an API
-              <ArrowRight className="ml-2 size-4" aria-hidden="true" />
-            </CtaLink>
+            />
           </div>
         </section>
       </main>

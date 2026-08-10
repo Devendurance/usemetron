@@ -1,0 +1,8 @@
+⨯ Another next dev server is already running.
+
+- Local:        http://localhost:3001
+- PID:          28380
+- Dir:          C:\Users\USER\Documents\ideas\celo-agentic-hack
+- Log:          .next\dev\logs\next-development.log
+
+Run taskkill /PID 28380 /F to stop it.

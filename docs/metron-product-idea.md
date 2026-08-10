@@ -1,222 +1,237 @@
-# Metron — Product Idea
+# Metron - Product Idea
 
-> **One line:** Metron lets any developer turn an API into a paid service in minutes—no billing code, no Stripe, no API keys. Callers pay per request using stablecoins on Celo, and developers earn instantly.
+> **Status:** Current product direction and target scope. The repository is a presentation UI shell; the payment gateway, wallet identity, persistence, and settlement flow are future implementation work.
 
-**Name rationale:** *Metron* comes from Greek *μέτρον*—a measure, standard, or means of measurement. It fits the product because every API request becomes a clear, measurable economic unit: one call, one price, one settlement. It is short, pronounceable, technically credible, and broad enough to grow from a gateway into the payment layer for machine-to-machine work. Trademark, domain, and social-handle clearance are not yet complete.
+## One line
 
----
+> **Metron turns API calls into paid work: one call, one price, one settlement.**
+
+Metron is intended to make a callable API payable per request through x402 V2 on Celo Mainnet. It should let a creator define an endpoint and let a caller or AI agent authorize one exact USDC payment before receiving useful work.
+
+This is not a claim that the current app has live routes, wallet auth, payment processing, creator payouts, or transaction history.
+
+## Why the name fits
+
+*Metron* comes from Greek *metron*: a measure, standard, or measured unit. The name fits the intended product because every request has a clear route, price, execution result, settlement state, and evidence record.
+
+## Current repository state
+
+The current app contains:
+
+- Landing and dashboard presentation surfaces.
+- A Call Line and Metron Receipt visual language.
+- Proxy and dashboard state previews that explicitly avoid making live payment claims.
+
+It does not contain:
+
+- Production API routes or a gateway handler.
+- PostgreSQL/Supabase schema, migrations, or transaction persistence.
+- Redis/Upstash, wallet authentication, x402 integration, or a Mainnet provider.
+- USDC integration, `payTo` routing, attribution runtime, or real analytics.
+
+No fake transactions, mock earnings, fake API data, or runtime fallback verifier should be added to make the idea look implemented.
 
 ## The problem
 
 ### API creators
 
-Developers can build a useful AI model, data feed, translation service, weather API, or automation endpoint in a weekend. Monetising it usually requires:
+An indie developer can build a useful data, translation, inference, or automation endpoint without wanting to build:
 
-- Stripe or another payment processor;
-- API-key provisioning and revocation;
-- usage metering and quota tracking;
-- billing dashboards and invoices;
-- subscriptions, pricing tiers and webhooks;
-- failed-payment handling, refunds and disputes;
-- payout access in the creator’s country.
+- Payment collection and settlement.
+- API keys, quotas, and usage metering.
+- Billing dashboards, invoices, and webhooks.
+- Per-request pricing and failure handling.
+- Wallet identity and evidence for each paid call.
 
-This turns a small API into a billing-infrastructure project. Many developers either give valuable APIs away for free or never launch them commercially.
+Small APIs are often given away or delayed because billing infrastructure becomes a second product.
 
-### API consumers and agents
+### Callers and agents
 
-A consumer often has to create an account, enter a card, choose a subscription and manage a key before making a single request. An autonomous AI agent cannot reliably complete that flow and does not have a conventional credit card.
+A caller that needs one request often faces account creation, card checkout, subscriptions, and API-key setup. An AI agent needs a machine-readable payment requirement and a bounded authorization path instead.
 
-Agents need to discover a useful service, authorise a small payment, receive the response and continue their task without human checkout.
+### Global access
 
-### Global creators
+Stablecoin settlement may widen the set of creators and callers who can participate, but wallet, regulatory, liquidity, and access conditions vary by jurisdiction. Metron must not claim universal availability.
 
-Developers in markets with limited Stripe or PayPal access are often unable to sell globally, even when they have a valuable API. Payout friction, account freezes, high remittance fees and multi-day settlement destroy otherwise viable transactions.
+## Intended solution
 
-> **Building an API takes a weekend. Monetising it should not take a month.**
+Metron is a payment route around a callable API, not a marketplace in the first release. The intended flow is:
 
----
+```text
+request resource
+  -> HTTP 402 + PAYMENT-REQUIRED
+  -> caller signs authorization
+  -> retry with PAYMENT-SIGNATURE
+  -> Metron verifies
+  -> upstream work executes
+  -> settlement is attempted according to policy
+  -> resource + PAYMENT-RESPONSE
+```
 
-## The solution
+The target protocol configuration is:
 
-Metron is a payment gateway for callable APIs. A developer pastes an endpoint, sets a price per request, and receives a paid URL. The original backend does not need billing code.
-
-### How it works
-
-1. The developer connects a Celo-compatible wallet.
-2. They paste an API URL, such as `https://myapi.com/v1/translate`.
-3. They set a price, such as `$0.005` per request or a token-based policy.
-4. Metron returns a powered URL, such as `https://your-metron-domain.example/p/abc123/translate`.
-5. A user or AI agent calls the powered endpoint.
-6. The caller pays the quoted amount in a supported stablecoin through Celo x402.
-7. Metron verifies settlement, forwards the request, and returns the API response.
-8. The developer receives payment in their wallet; if the upstream request fails, the payment is not captured or is automatically reversed according to the settlement flow.
-
-### What Metron removes
-
-| Traditional setup | Metron |
+| Field | Value |
 |---|---|
-| 2–6 weeks of billing work | A few minutes to publish an endpoint |
-| Stripe account and country support | Celo wallet and stablecoin settlement |
-| API keys, plans and monthly invoices | Signed per-request authorisation |
-| $0.30-style fixed transaction floors | Micropayments viable at sub-cent values |
-| Multi-day payout cycles | Near-real-time wallet settlement |
-| Human checkout | Agent-compatible HTTP payment flow |
-| Manual failed-payment handling | Programmatic settlement and failure handling |
+| Network | Celo Mainnet |
+| Chain ID | `42220` |
+| CAIP-2 | `eip155:42220` |
+| Token | USDC |
+| Decimals | `6` |
+| Address | `0xcEBA9300f2b948710d2653dD7B07f33A8B32118C` |
+| x402 version | V2 |
+| Scheme | `exact` |
 
-These are product goals to validate in the implementation; they are not claims of universal availability or guaranteed performance until tested.
+Use integer USDC base units, not floating point. The canonical headers are `PAYMENT-REQUIRED`, `PAYMENT-SIGNATURE`, and `PAYMENT-RESPONSE`. `X-PAYMENT`, `X-Payment`, and `X-PAYMENT-RECEIPT` are legacy compatibility names only when explicitly scoped.
 
----
+The V2 header values are Base64-encoded JSON objects (`PaymentRequired`, `PaymentPayload`, and `SettlementResponse`). The target Celo Mainnet USDC price object uses an integer string amount, the registered USDC address, and `extra: { name: "USDC", version: "2" }`.
 
-## Primary audiences
+Use `https://x402.celo.org` as the human-facing dashboard and `https://api.x402.celo.org` as the production facilitator API. The dashboard is never a backend API host. `/verify`, `/supported`, and `/health` are open; `/settle` requires a server-side `X402_API_KEY` sent as the facilitator's `X-API-Key` header, and `/verify` alone does not prove settlement configuration.
 
-### 1. AI-agent and tool developers — primary wedge
+Authorization, verification, settlement, execution, and delivery are distinct. If upstream work fails before settlement, do not settle. Record the attempt as aborted and non-settled. Do not claim an automatic refund or reversal.
 
-They need external APIs that agents can discover and pay for autonomously. Metron gives them a simple way to expose paid capabilities without building a marketplace or billing layer first.
+## Current Mainnet MVP
 
-### 2. Indie developers and side-project builders
+This section defines the smallest useful target for the current build. None of these production capabilities should be described as complete until evidenced.
 
-They have a useful endpoint but do not want to spend weeks building Stripe, quotas, invoicing, and payout infrastructure.
+### Creator path
 
-### 3. Data providers
+1. Authenticate a real Celo Mainnet wallet with a nonce-bound signature.
+2. Persist an upstream URL with SSRF protection.
+3. Define an integer USDC base-unit amount.
+4. Select a `payTo` destination through an explicit implementation decision.
+5. Receive a persisted route identifier and powered URL.
+6. Inspect real call and settlement evidence after traffic occurs.
 
-They want to sell a query, record, transformation, or data refresh rather than force every customer into a monthly plan.
+### Caller path
 
-### 4. Developers in emerging markets
+1. Request a powered URL.
+2. Read `PAYMENT-REQUIRED` from the `402` response.
+3. Verify that the requirement is `exact`, `eip155:42220`, USDC, and the expected amount/destination.
+4. Sign a payment authorization and retry with `PAYMENT-SIGNATURE`.
+5. Receive a response only after the gateway's verification, upstream, and settlement policy completes.
+6. Read `PAYMENT-RESPONSE` and the useful upstream response.
 
-They need global, stablecoin-native settlement without depending on a payment processor that may not support their country.
+### Persistence path
 
-### Secondary audience: callers
+PostgreSQL/Supabase stores creators, routes, call attempts, lifecycle states, facilitator results, and transaction hashes when available. Redis/Upstash is limited to ephemeral nonce/replay locks, rate limits, route caching, and auth/session nonces.
 
-Human developers and AI agents calling a paid API. Their need is not “buy an API subscription”; it is “make one authorised request and receive a predictable response.”
+Target lifecycle states are `PAYMENT_REQUIRED`, `VERIFIED`, `UPSTREAM_FAILED`, `SETTLEMENT_FAILED`, and `SETTLED` or documented equivalents.
 
----
+### Definition of MVP proof
 
-## Core use case
+- One real endpoint is persisted.
+- One real x402 V2 challenge is returned.
+- One real signed retry is verified.
+- One real upstream response is produced.
+- One real Celo Mainnet settlement is completed.
+- The transaction hash and lifecycle evidence are persisted.
+- The existing dashboard displays real evidence and remains honest when data is absent.
 
-An AI research agent needs a live data endpoint. It discovers a Metron-powered URL, receives the price and payment requirements, signs a stablecoin payment through the Celo x402 facilitator, gets the data, and continues its task—all without a credit-card checkout.
+Testnet activity may be a development preflight, but it is not the definition of done.
 
-A developer with a translation or image-processing API can then earn per request from global callers without changing their backend.
+## Future vision
 
----
+### Near term
 
-## Business model
-
-- **Transaction fee:** an initial 1–2% protocol fee, subject to validating sustainable economics at micropayment size.
-- **Premium features:** analytics, custom domains, access policies, higher-volume support and SLA options.
-- **Future marketplace services:** discovery, reputation, managed routing and usage intelligence.
-
-The first proof is not a pricing page. It is real, repeatable, successful settlement volume.
-
----
-
-## Why Celo
-
-- Low-cost transactions make small API charges economically practical.
-- Fast finality reduces waiting between payment and response.
-- Stablecoins make endpoint pricing legible and reduce asset volatility.
-- Celo’s x402 facilitator supports HTTP 402-style agent/API payments.
-- MiniPay creates a mobile-first distribution opportunity.
-- ERC-8021 attribution can help track transaction volume generated for the ecosystem.
-
-Celo should be visible in the product as infrastructure that makes the action possible—not as decoration in the logo or interface.
-
----
-
-## Hackathon alignment
-
-The strongest initial track is **Most x402 Payments** because Metron’s core action is repeated pay-per-request settlement on Celo. The product should also prepare for the **Most Revenue Generated** track by registering attribution and tagging eligible non-x402 transactions as required.
-
-### Demo requirements
-
-The submission should show:
-
-1. A developer publishing a paid endpoint.
-2. A caller or agent discovering the payment requirement.
-3. A real x402 settlement through the Celo facilitator.
-4. The request being forwarded only after payment verification.
-5. The upstream response returning successfully.
-6. Developer wallet receipt and transaction evidence.
-7. Automatic failure/refund behaviour or a clearly tested failure state.
-8. Attribution/payTo wallet and verifiable on-chain transaction links.
-
-The winning story is not “we built an API dashboard.” It is:
-
-> **One real agent call became one real Celo payment, one useful API response, and one instant creator payout.**
-
----
-
-## Competitive context
-
-| Alternative | Limitation Metron addresses |
-|---|---|
-| Stripe + custom billing | Card, country, billing and micropayment friction |
-| RapidAPI-style marketplaces | Centralisation, marketplace overhead and weak agent-native payment flow |
-| x402 frameworks | Developer implementation burden; not a zero-code publishing product |
-| API gateways | Routing and rate limiting without payment settlement |
-| Usage-billing platforms | Subscription/invoice assumptions and delayed settlement |
-
-Metron’s intended position is not merely “another API marketplace.” It is the **zero-code settlement layer for callable work**.
-
----
-
-## Product scope
-
-### Hackathon MVP
-
-- Wallet connection;
-- endpoint registration;
-- per-request price policy;
-- powered URL generation;
-- x402 payment requirement and Celo facilitator settlement;
-- payment verification before proxying;
-- upstream failure handling;
-- creator earnings view;
-- caller response and transaction evidence;
-- minimal request/settlement log;
-- attribution/payTo wallet configuration.
-
-### Defer
-
-- Open API marketplace and discovery ranking;
-- self-serve sponsor or enterprise dashboards;
-- multi-chain routing;
-- complex subscriptions;
-- token-level LLM billing beyond a demonstrable policy;
-- advanced reputation and reviews;
-- automated high-value payouts without fraud controls.
-
----
-
-## Vision
-
-### Short term
-
-Prove a reliable Celo-native paid API gateway with real x402 transactions, a clear creator flow, and a verifiable agent/API call.
+Prove a reliable Celo-native paid API route with an external agent, clear failure states, persistent receipts, and independently verifiable settlement evidence.
 
 ### Medium term
 
-Add discovery, agent framework integrations, custom domains, analytics, reputation, multi-chain routing and richer usage pricing.
+Add endpoint discovery, agent framework integrations, SDKs, custom domains, usage policies, analytics derived from real records, reputation, and operational tooling.
 
 ### Long term
 
-Become the payment layer for machine-to-machine work: any developer can publish a callable capability, and any agent can discover, pay for and use it without human checkout.
+Become a payment layer for machine-to-machine work: developers publish callable capabilities, and agents discover, authorize, pay for, and use them without human checkout.
 
----
+Future vision does not authorize current copy to claim a marketplace, global payout network, automatic refunds, or creator-direct settlement.
 
-## Recommended one-liners
+## Hackathon optimization
 
-### Primary
+### Primary: Track 2 Most x402 Payments
 
-> **Metron turns API calls into paid work: publish an endpoint, set a price, and let agents pay on Celo.**
+Optimize for successful Celo Mainnet x402 settlement **count**, not amount. Track 2 activity is wallet-attributed through the submitted agent/payTo wallet: settlements to or from that registered wallet are attributable only when the wallet actually participates in the settlement path. Arbitrary creator wallets do not automatically count.
 
-### Creator-facing
+The hackathon FAQ says facilitator relayer settlements cannot carry Metron's tag. Therefore:
 
-> **Monetise your API in minutes, without building billing.**
+- Do not require `celo_91fed90b97fc` for Track 2.
+- Do not claim that every facilitator settlement carries it.
+- Do not send tagged mirror transactions.
+- Retain real settlement hashes and wallet evidence.
 
-### Agent-facing
+### Secondary: Track 1 Most Revenue Generated
 
-> **Pay for the exact API capability you need, one request at a time.**
+Pursue only eligible onchain volume from genuine Metron-originated direct transactions carrying the exact assigned tag `celo_91fed90b97fc`.
 
-### Hackathon-facing
+Preserve existing attribution codes with the supported multi-code form:
 
-> **Metron is a zero-code x402 gateway that lets agents pay APIs and lets API creators earn instantly on Celo.**
+```ts
+const suffix = toDataSuffix([
+  "your_existing_code",
+  "celo_91fed90b97fc",
+])
+```
+
+Keep hashes and verify evidence. Do not invent volume, self-transfer funds, wash activity, or sybil traffic. Do not assert that the Celo hosted facilitator supports Metron's Builder Code/ERC-8021 path for Track 1; mark it **REQUIRES OFFICIAL CONFIRMATION** if needed.
+
+### Registered identity
+
+| Field | Value |
+|---|---|
+| Project | Metron |
+| Repository | [Devendurance/usemetron](https://github.com/Devendurance/usemetron) |
+| Builder | Endurance Udoh |
+| X | `@devendyyy` |
+| Telegram | `@devendurance` |
+| Assigned tag | `celo_91fed90b97fc` |
+| Registered agent/payTo wallet | `0x21E5Fc03E4305CC8CFb874253c6d66A8bdB0bcDa` |
+
+## Business model hypothesis
+
+The product may eventually support:
+
+- A small transaction fee, subject to validating economics at micropayment sizes.
+- Paid analytics, custom domains, policies, higher-volume support, and SLAs.
+- Discovery, reputation, managed routing, and usage intelligence.
+
+These are hypotheses, not current revenue claims. The first proof is a real, repeatable settlement path and honest evidence.
+
+## Competitive context
+
+| Alternative | Intended Metron response |
+|---|---|
+| Stripe plus custom billing | Reduce card, account, and billing-infrastructure work for per-request use. |
+| API marketplaces | Start with a route and payment layer instead of marketplace discovery overhead. |
+| x402 libraries | Productize route configuration, persistence, and evidence around the protocol. |
+| API gateways | Add payment requirements and settlement policy to routing. |
+| Usage-billing platforms | Support an exact per-request flow rather than requiring subscriptions first. |
+
+Do not call Metron the only product with these capabilities without current competitive research.
+
+## What Metron should and should not claim
+
+Use:
+
+- **Turn API calls into paid work.**
+- **One call. One price. One settlement.**
+- Pay-per-request API infrastructure.
+- Inspectable payment terms and settlement evidence.
+- Target Celo Mainnet x402 V2 support.
+
+Do not use as current fact:
+
+- Creator-direct payout.
+- Instant earnings.
+- Automatic refund or reversal.
+- Live transaction history or analytics.
+- Global availability.
+- A completed x402 integration.
+
+## References
+
+- [Celo x402](https://docs.celo.org/build-on-celo/build-with-ai/x402)
+- [Celo network overview](https://docs.celo.org/build-on-celo/network-overview)
+- [Celo stablecoin contracts](https://docs.celo.org/tooling/contracts/stablecoin-contracts)
+- [x402 HTTP 402 and V2 headers](https://docs.x402.org/core-concepts/http-402)
+- [x402 Builder Code extension](https://docs.x402.org/extensions/builder-code)
+- [Celo Builders FAQ](https://celobuilders.xyz/hackathons/agentic-payments-defai/faqs)
+- [Celo Builders tracks](https://celobuilders.xyz/hackathons/agentic-payments-defai/tracks)

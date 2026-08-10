@@ -4,6 +4,7 @@ import Link from "next/link"
 import { Menu } from "lucide-react"
 
 import { BrandMark } from "@/components/metron"
+import { AuthCta } from "@/components/auth/auth-cta"
 import {
   Sheet,
   SheetClose,
@@ -59,13 +60,9 @@ function MarketingHeader() {
                 </SheetClose>
               ))}
               <SheetClose
-                render={
-                  <Link href="/dashboard/endpoints/new" prefetch={false} />
-                }
-                className="mt-6 inline-flex min-h-12 items-center justify-center rounded-pill border-2 border-ink bg-lime px-6 text-sm font-bold tracking-[0.04em] text-ink transition-colors hover:bg-lime-hover focus-visible:outline-none focus-visible:shadow-focus"
-              >
-                PUBLISH AN API
-              </SheetClose>
+                render={<AuthCta variant="lime" href="/dashboard" />}
+                className="mt-6"
+              />
             </nav>
           </SheetContent>
         </Sheet>
@@ -80,7 +77,7 @@ function MarketingHeader() {
           aria-label="Metron home"
           className="relative flex min-h-[68px] items-center border-r-2 border-ink px-3 min-[1024px]:px-6 focus-visible:z-10 focus-visible:bg-clear-paper focus-visible:outline-2 focus-visible:outline-blueprint focus-visible:outline-offset-[-4px] focus-visible:shadow-focus"
         >
-          <BrandMark className="[&_[data-slot=brand-mark-name]]:uppercase" />
+          <BrandMark className="[&_[data-slot=brand-mark-name]]:hidden min-[768px]:[&_[data-slot=brand-mark-name]]:inline min-[768px]:[&_[data-slot=brand-mark-name]]:uppercase" />
         </Link>
         {navigation.map((item) => (
           <Link
@@ -92,13 +89,7 @@ function MarketingHeader() {
           </Link>
         ))}
         <div className="flex items-center p-2 min-[1024px]:p-3">
-          <Link
-            href="/dashboard/endpoints/new"
-            prefetch={false}
-            className="relative flex min-h-12 w-full items-center justify-center rounded-pill bg-ink px-2 text-center text-[10px] font-bold leading-tight tracking-[0.04em] text-clear-paper transition-colors hover:bg-blueprint focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-blueprint focus-visible:outline-offset-2 focus-visible:shadow-focus min-[1024px]:px-4 min-[1024px]:text-sm min-[1024px]:leading-normal motion-reduce:transition-none"
-          >
-            PUBLISH AN API
-          </Link>
+          <AuthCta variant="ink" href="/dashboard" className="w-full" />
         </div>
       </nav>
     </header>

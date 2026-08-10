@@ -108,7 +108,9 @@ components:
 
 ## Overview
 
-Metron is a payment layer for callable APIs. A developer publishes an endpoint, a caller or AI agent authorises one request, the API executes, and the creator receives a clear settlement record on Celo.
+> **Implementation boundary:** This is a visual specification. Amounts, statuses, calls, wallets, transaction hashes, and receipts shown below are illustrative composition copy only. Runtime UI must display persisted real records or explicit unavailable states; this document does not authorize mock activity.
+
+Metron is intended to be a payment layer for callable APIs. A developer publishes an endpoint, a caller or AI agent authorises one request, the API executes, and the creator can inspect a settlement record on Celo after the real integration is implemented.
 
 The visual territory is **The Paid Route**:
 
@@ -459,7 +461,7 @@ Labels: `Publish an API`, `View payment terms`, `See the receipt`.
 THIS CALL COSTS 0.005 USDC
 NETWORK: CELO
 UPSTREAM: translate.v1
-FAILURE RULE: NO CHARGE IF THE API DOES NOT RESPOND
+FAILURE RULE: NO SETTLEMENT IF UPSTREAM WORK FAILS BEFORE SETTLEMENT
 ```
 
 Use Blueprint Blue for the route indicator, not as a full-screen background.

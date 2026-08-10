@@ -1,90 +1,319 @@
 "use client"
 
-import { AlertTriangle, Copy, PenLine, Save } from "lucide-react"
+import Link from "next/link"
+import { useRouter } from "next/navigation"
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Loader2,
+  PenLine,
+  Power,
+  Save,
+  Trash2,
+} from "lucide-react"
 import { FormEvent, useState } from "react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
-import { CallLine, CopyButton, EmptyState, MetronReceipt } from "@/components/metron"
+import { EmptyState } from "@/components/metron"
+import { CopyButton } from "@/components/metron/copy-button"
+import { StatusBadge } from "@/components/metron/status-badge"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Spinner } from "@/components/ui/spinner"
+import { useAuth } from "@/lib/auth/use-auth"
+import {
+  EndpointClientError,
+  endpointErrorMessage,
+  endpointQueryKeys,
+  fetchEndpoint,
+  formatEndpointDate,
+  parsePriceMicroUsdc,
+  parseUpstreamUrl,
+  retireEndpoint,
+  updateEndpoint,
+  type EndpointView,
+  type UpdateEndpointPatch,
+} from "@/lib/endpoints/client"
+import { cn } from "@/lib/utils"
 
-function EndpointDetail() {
-  const [route, setRoute] = useState("")
-  const [price, setPrice] = useState("")
-  const [editNotice, setEditNotice] = useState(false)
+type EditValues = {
+  name: string
+  description: string
+  upstreamUrl: string
+  priceUsdc: string
+}
+type EditErrors = Partial<Record<keyof EditValues, string>>
 
-  function saveRoute(event: FormEvent<HTMLFormElement>) {
+function authLabel(endpoint: EndpointView): string {
+  if (!endpoint.hasUpstreamAuth || endpoint.upstreamAuthType === "NONE") {
+    return "None"
+  }
+  if (endpoint.upstreamAuthType === "BEARER") {
+    return "Bearer token"
+  }
+  if (endpoint.upstreamAuthType === "API_KEY") {
+    return `API key · ${endpoint.headerName ?? "custom header"}`
+  }
+  return "None"
+}
+
+function EndpointDetail({ id }: { id: string }) {
+  const router = useRouter()
+  const queryClient = useQueryClient()
+  const { refresh: refreshAuth } = useAuth()
+
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState<EditValues | null>(null)
+  const [draftErrors, setDraftErrors] = useState<EditErrors>({})
+  const [confirmingRetire, setConfirmingRetire] = useState(false)
+
+  const { data, isPending, isError, error, refetch } = useQuery({
+    queryKey: endpointQueryKeys.detail(id),
+    queryFn: () => fetchEndpoint(id),
+  })
+
+  const endpoint = data?.endpoint
+
+  const updateMutation = useMutation({
+    mutationFn: (patch: UpdateEndpointPatch) => updateEndpoint(id, patch),
+    onSuccess: ({ endpoint: updated }) => {
+      queryClient.setQueryData(endpointQueryKeys.detail(id), { endpoint: updated })
+      // Keep the list view consistent with the latest name/status.
+      void queryClient.invalidateQueries({ queryKey: endpointQueryKeys.list })
+    },
+  })
+
+  const retireMutation = useMutation({
+    mutationFn: () => retireEndpoint(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: endpointQueryKeys.list })
+      router.push("/dashboard/endpoints")
+    },
+    onError: () => {
+      // Require a fresh two-click confirmation after a failed retire.
+      setConfirmingRetire(false)
+    },
+  })
+
+  function startEditing() {
+    if (!endpoint) return
+    setDraft({
+      name: endpoint.name,
+      description: endpoint.description ?? "",
+      upstreamUrl: endpoint.upstreamUrl,
+      priceUsdc: endpoint.priceUsdc,
+    })
+    setDraftErrors({})
+    setEditing(true)
+  }
+
+  function cancelEditing() {
+    setDraft(null)
+    setDraftErrors({})
+    setEditing(false)
+  }
+
+  function updateDraft(field: keyof EditValues, value: string) {
+    setDraft((current) => (current ? { ...current, [field]: value } : current))
+    setDraftErrors((current) => ({ ...current, [field]: undefined }))
+  }
+
+  function saveEdit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setEditNotice(true)
+    if (!draft) return
+    const nextErrors: EditErrors = {}
+    if (!draft.name.trim()) nextErrors.name = "Enter a name for this endpoint."
+    if (!parseUpstreamUrl(draft.upstreamUrl)) {
+      nextErrors.upstreamUrl = "Enter a valid HTTP or HTTPS upstream URL."
+    }
+    const micros = parsePriceMicroUsdc(draft.priceUsdc)
+    if (micros === null || micros <= 0) {
+      nextErrors.priceUsdc = "Enter a price greater than zero."
+    }
+    setDraftErrors(nextErrors)
+    if (Object.keys(nextErrors).length > 0) return
+
+    updateMutation.mutate(
+      {
+        name: draft.name.trim(),
+        description: draft.description.trim() || null,
+        upstreamUrl: draft.upstreamUrl.trim(),
+        priceUsdc: draft.priceUsdc.trim(),
+      },
+      { onSuccess: cancelEditing }
+    )
+  }
+
+  function toggleActive() {
+    if (!endpoint) return
+    const nextActive = !endpoint.isActive
+    // Optimistic update for an instant toggle; refetch on failure to resync.
+    const previous = endpoint
+    queryClient.setQueryData(endpointQueryKeys.detail(id), {
+      endpoint: { ...endpoint, isActive: nextActive },
+    })
+    updateMutation.mutate(
+      { isActive: nextActive },
+      {
+        onError: () => {
+          queryClient.setQueryData(endpointQueryKeys.detail(id), {
+            endpoint: previous,
+          })
+        },
+      }
+    )
+  }
+
+  function handleRetireClick() {
+    if (confirmingRetire) {
+      retireMutation.mutate()
+    } else {
+      setConfirmingRetire(true)
+    }
+  }
+
+  const endpointError = error
+    ? error instanceof EndpointClientError
+      ? error
+      : null
+    : null
+  const notFound =
+    endpointError?.code === "ENDPOINT_NOT_FOUND"
+  const unauthenticated = endpointError?.code === "UNAUTHENTICATED"
+
+  const updateFailedMessage =
+    updateMutation.isError &&
+    updateMutation.error instanceof EndpointClientError
+      ? endpointErrorMessage(updateMutation.error.code)
+      : null
+  const retireFailedMessage =
+    retireMutation.isError &&
+    retireMutation.error instanceof EndpointClientError
+      ? endpointErrorMessage(retireMutation.error.code)
+      : null
+
+  if (isPending) {
+    return <div aria-live="polite" aria-label="Loading endpoint" className="space-y-3"><div className="flex items-center gap-2 text-sm text-muted-ink"><Spinner className="size-4 text-blueprint" />Loading endpoint…</div><Skeleton className="h-40 w-full bg-cream" /></div>
+  }
+
+  if (isError || !endpoint) {
+    return (
+      <EmptyState
+        className="mt-3 min-w-0 max-w-full"
+        title={notFound ? "Endpoint not found" : unauthenticated ? "Your session has expired" : "Endpoint unavailable"}
+        description={notFound ? "This powered route no longer exists or was retired." : unauthenticated ? "Sign in again to view this endpoint." : endpointError ? endpointErrorMessage(endpointError.code) : "The endpoint could not be loaded."}
+        icon={<AlertTriangle aria-hidden="true" />}
+        action={(() => {
+          if (notFound) {
+            return <Link href="/dashboard/endpoints" className="inline-flex min-h-11 items-center gap-2 rounded-pill border-2 border-ink bg-lime px-5 text-sm font-bold text-ink hover:bg-lime-hover focus-visible:shadow-focus focus-visible:outline-none"><ArrowLeft className="size-4" aria-hidden="true" />Back to endpoints</Link>
+          }
+          return <Button type="button" onClick={() => { if (unauthenticated) refreshAuth(); void refetch() }} className="min-h-11 rounded-pill border-2 border-ink bg-lime px-5 font-bold text-ink hover:bg-lime-hover">Try again</Button>
+        })()}
+      />
+    )
   }
 
   return (
     <div className="grid min-w-0 max-w-full gap-8">
-      <Alert className="min-w-0 max-w-full border-review-bronze/30 bg-review-bronze/10 text-ink">
-        <AlertTriangle aria-hidden="true" />
-        <AlertTitle>Route record not found</AlertTitle>
-        <AlertDescription className="text-muted-ink">No endpoint is connected to this route yet. The route identifier is intentionally not shown as endpoint or account data.</AlertDescription>
-      </Alert>
+      {(updateFailedMessage || retireFailedMessage) && (
+        <Alert className="border-failure-red/30 bg-failure-red/10 text-ink">
+          <AlertTriangle aria-hidden="true" />
+          <AlertTitle>Could not save changes</AlertTitle>
+          <AlertDescription className="text-muted-ink">{updateFailedMessage ?? retireFailedMessage}</AlertDescription>
+        </Alert>
+      )}
 
       <section className="relative mt-3 min-w-0 max-w-full rounded-mobile-card border-2 border-ink bg-mobile-surface p-5 pt-7 shadow-[6px_6px_0_#141414] before:absolute before:-top-3 before:left-5 before:h-3 before:w-20 before:rounded-t-md before:border-x-2 before:border-t-2 before:border-ink before:bg-mobile-purple min-[600px]:mt-0 min-[600px]:rounded-card min-[600px]:border-0 min-[600px]:bg-clear-paper min-[600px]:p-8 min-[600px]:shadow-none min-[600px]:before:hidden">
         <div className="flex flex-col gap-4 border-b border-border pb-6 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className="font-metadata text-xs font-bold tracking-[0.1em] text-blueprint uppercase">Route detail</p>
-            <h1 className="mt-3 font-display text-3xl font-bold tracking-[-0.035em]">Unconnected route</h1>
-            <p className="mt-2 text-sm leading-relaxed text-muted-ink">Set up a route when publishing becomes available. The structural fields remain deliberately blank.</p>
+          <div className="min-w-0">
+            <p className="font-metadata text-xs font-bold tracking-[0.1em] text-blueprint uppercase">Endpoint detail</p>
+            <h1 className="mt-3 font-display text-3xl font-bold tracking-[-0.035em] break-words">{endpoint.name}</h1>
+            <p className="mt-2 text-sm leading-relaxed text-muted-ink">{endpoint.description || "—"}</p>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              {endpoint.isActive ? <StatusBadge variant="verified">Active</StatusBadge> : <StatusBadge variant="neutral">Disabled</StatusBadge>}
+              <span className="font-mono text-xs font-bold tracking-[0.04em] text-muted-ink">/{endpoint.slug}</span>
+            </div>
           </div>
-          <CopyButton value="" disabled label="Copy route" copiedLabel="Copied route" className="min-h-11 border-2 border-ink" />
-        </div>
-        <div className="mt-6 min-w-0 max-w-full"><CallLine /></div>
-      </section>
-
-      <div className="grid min-w-0 max-w-full gap-8 xl:grid-cols-[minmax(0,1.1fr)_minmax(18rem,.9fr)]">
-        <form onSubmit={saveRoute} className="relative mt-3 min-w-0 max-w-full rounded-mobile-card border-2 border-ink bg-mobile-surface p-5 pt-7 shadow-[6px_6px_0_#141414] before:absolute before:-top-3 before:left-5 before:h-3 before:w-20 before:rounded-t-md before:border-x-2 before:border-t-2 before:border-ink before:bg-mobile-magenta min-[600px]:mt-0 min-[600px]:rounded-card min-[600px]:border-0 min-[600px]:bg-clear-paper min-[600px]:p-8 min-[600px]:shadow-none min-[600px]:before:hidden">
-          <div className="flex items-center gap-3">
-            <span className="flex size-11 items-center justify-center rounded-control bg-coral"><PenLine className="size-5" aria-hidden="true" /></span>
-            <div><h2 className="font-heading text-xl font-semibold">Route and price</h2><p className="mt-1 text-sm text-muted-ink">Local editor only — changes are not saved.</p></div>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            {editing ? (
+              <Button type="button" variant="outline" onClick={cancelEditing} className="min-h-11 rounded-pill border-2 border-ink px-5 font-bold">Cancel</Button>
+            ) : (
+              <Button type="button" variant="outline" onClick={startEditing} className="min-h-11 rounded-pill border-2 border-ink px-5 font-bold"><PenLine className="size-4" aria-hidden="true" />Edit</Button>
+            )}
+            <Button type="button" variant="outline" disabled={updateMutation.isPending} onClick={toggleActive} className={cn("min-h-11 rounded-pill border-2 border-ink px-5 font-bold", endpoint.isActive ? "bg-clear-paper text-ink hover:bg-cream" : "bg-lime text-ink hover:bg-lime-hover")}>
+              {updateMutation.isPending ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <Power className="size-4" aria-hidden="true" />}
+              {endpoint.isActive ? "Disable" : "Enable"}
+            </Button>
+            <Button type="button" variant="outline" disabled={retireMutation.isPending} onClick={handleRetireClick} className={cn("min-h-11 rounded-pill border-2 border-ink px-5 font-bold", confirmingRetire ? "bg-failure-red/15 text-failure-red" : "bg-clear-paper text-ink hover:bg-cream")}>
+              {retireMutation.isPending ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <Trash2 className="size-4" aria-hidden="true" />}
+              {retireMutation.isPending ? "Retiring…" : confirmingRetire ? "Confirm retire?" : "Retire endpoint"}
+            </Button>
           </div>
-          <FieldGroup className="mt-6">
-            <Field>
-              <FieldLabel htmlFor="route-path">Route path</FieldLabel>
-              <Input id="route-path" value={route} onChange={(event) => setRoute(event.target.value)} className="min-h-11 rounded-control border-2 border-ink bg-cream px-4" placeholder="No route path available" />
-              <FieldDescription>No powered route exists while this endpoint is unconnected.</FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="route-price">Price per request</FieldLabel>
-              <Input id="route-price" inputMode="decimal" value={price} onChange={(event) => setPrice(event.target.value)} className="min-h-11 rounded-control border-2 border-ink bg-cream px-4" placeholder="—" />
-              <FieldDescription>Currency and settlement policy have not been configured.</FieldDescription>
-            </Field>
-          </FieldGroup>
-          {editNotice && <p role="status" className="mt-4 text-sm text-review-bronze">This edit is local only — publishing integration is unavailable.</p>}
-          <Button type="submit" className="mt-6 min-h-11 rounded-pill border-2 border-ink bg-lime px-5 font-bold text-ink hover:bg-lime-hover"><Save className="size-4" aria-hidden="true" />Review local edits</Button>
-        </form>
-
-        <MetronReceipt className="mt-3 min-w-0 max-w-full rounded-mobile-card border-2 border-ink bg-mobile-surface shadow-[6px_6px_0_#141414] min-[600px]:mt-0 min-[600px]:rounded-card min-[600px]:border-0 min-[600px]:bg-clear-paper min-[600px]:shadow-none" callId="—" route="—" price="—" network="Celo — unavailable" status="—" response="—" creator="—" transaction="—" />
-      </div>
-
-      <section className="relative mt-3 min-w-0 max-w-full rounded-mobile-card border-2 border-ink bg-mobile-surface p-5 pt-7 shadow-[6px_6px_0_#141414] before:absolute before:-top-3 before:left-5 before:h-3 before:w-20 before:rounded-t-md before:border-x-2 before:border-t-2 before:border-ink before:bg-mobile-purple min-[600px]:mt-0 min-[600px]:rounded-card min-[600px]:border-0 min-[600px]:bg-clear-paper min-[600px]:p-8 min-[600px]:shadow-none min-[600px]:before:hidden">
-        <div className="flex flex-col gap-2 border-b border-border pb-6 sm:flex-row sm:items-end sm:justify-between">
-          <div><h2 className="font-heading text-xl font-semibold">SDK call</h2><p className="mt-1 text-sm leading-relaxed text-muted-ink">No route value exists to generate a request. Copy controls remain disabled.</p></div>
-          <CopyButton value="" disabled label="Copy snippet" copiedLabel="Copied snippet" className="min-h-11 border-2 border-ink" />
         </div>
-        <Tabs defaultValue="curl" className="mt-6">
-          <TabsList variant="line" aria-label="SDK language">
-            <TabsTrigger value="curl" className="min-h-11 px-4 font-bold">cURL</TabsTrigger>
-            <TabsTrigger value="typescript" className="min-h-11 px-4 font-bold">TypeScript</TabsTrigger>
-            <TabsTrigger value="python" className="min-h-11 px-4 font-bold">Python</TabsTrigger>
-          </TabsList>
-          {["curl", "typescript", "python"].map((language) => (
-            <TabsContent key={language} value={language} className="mt-5 rounded-control border border-dashed border-border bg-cream p-5 font-mono text-sm leading-relaxed text-muted-ink">
-              <span className="sr-only">{language} request snippet: </span>—
-            </TabsContent>
-          ))}
-        </Tabs>
-      </section>
 
-      <EmptyState className="min-w-0 max-w-full" title="No endpoint is connected to this route yet" description="Return to Endpoints to publish a new API when the integration is available." icon={<Copy aria-hidden="true" />} />
+        {editing ? (
+          <form noValidate onSubmit={saveEdit} className="mt-6 grid gap-6">
+            <FieldGroup>
+              <Field data-invalid={Boolean(draftErrors.name)}>
+                <FieldLabel htmlFor="edit-endpoint-name">Endpoint name <span aria-hidden="true">*</span><span className="sr-only"> required</span></FieldLabel>
+                <Input id="edit-endpoint-name" required value={draft?.name ?? ""} onChange={(event) => updateDraft("name", event.target.value)} aria-invalid={Boolean(draftErrors.name)} className="min-h-11 rounded-control border-2 border-ink bg-cream px-4" />
+                {draftErrors.name && <FieldError id="edit-endpoint-name-error">{draftErrors.name}</FieldError>}
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="edit-endpoint-description">Description</FieldLabel>
+                <textarea id="edit-endpoint-description" value={draft?.description ?? ""} onChange={(event) => updateDraft("description", event.target.value)} className="min-h-11 w-full rounded-control border-2 border-ink bg-cream px-4 py-3 text-base outline-none focus-visible:shadow-focus placeholder:text-muted-ink md:text-sm" rows={3} />
+              </Field>
+              <Field data-invalid={Boolean(draftErrors.upstreamUrl)}>
+                <FieldLabel htmlFor="edit-upstream-url">Upstream URL <span aria-hidden="true">*</span><span className="sr-only"> required</span></FieldLabel>
+                <Input id="edit-upstream-url" required type="url" value={draft?.upstreamUrl ?? ""} onChange={(event) => updateDraft("upstreamUrl", event.target.value)} aria-invalid={Boolean(draftErrors.upstreamUrl)} className="min-h-11 rounded-control border-2 border-ink bg-cream px-4" />
+                {draftErrors.upstreamUrl && <FieldError id="edit-upstream-url-error">{draftErrors.upstreamUrl}</FieldError>}
+              </Field>
+              <Field data-invalid={Boolean(draftErrors.priceUsdc)}>
+                <FieldLabel htmlFor="edit-price">Flat price per request <span aria-hidden="true">*</span><span className="sr-only"> required</span></FieldLabel>
+                <Input id="edit-price" required inputMode="decimal" value={draft?.priceUsdc ?? ""} onChange={(event) => updateDraft("priceUsdc", event.target.value)} aria-invalid={Boolean(draftErrors.priceUsdc)} className="min-h-11 rounded-control border-2 border-ink bg-cream px-4" placeholder="0.005" />
+                {draftErrors.priceUsdc && <FieldError id="edit-price-error">{draftErrors.priceUsdc}</FieldError>}
+              </Field>
+            </FieldGroup>
+            <Button type="submit" disabled={updateMutation.isPending} className="min-h-11 w-fit rounded-pill border-2 border-ink bg-lime px-5 font-bold text-ink hover:bg-lime-hover">
+              {updateMutation.isPending ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <Save className="size-4" aria-hidden="true" />}
+              {updateMutation.isPending ? "Saving…" : "Save changes"}
+            </Button>
+          </form>
+        ) : (
+          <dl className="mt-6 grid min-w-0 max-w-full gap-5">
+            <div className="min-w-0">
+              <dt className="font-metadata text-xs font-bold tracking-[0.08em] text-muted-ink uppercase">Upstream URL</dt>
+              <dd className="mt-2 flex min-w-0 flex-wrap items-center gap-3">
+                <code className="min-w-0 max-w-full truncate rounded-control border border-border bg-cream px-3 py-2 font-mono text-sm text-ink">{endpoint.upstreamUrl}</code>
+                <CopyButton value={endpoint.upstreamUrl} label="Copy upstream URL" copiedLabel="Copied" className="min-h-11 border-2 border-ink" />
+              </dd>
+            </div>
+            <div>
+              <dt className="font-metadata text-xs font-bold tracking-[0.08em] text-muted-ink uppercase">Price per request</dt>
+              <dd className="mt-2 font-display text-2xl font-bold tracking-[-0.02em] tabular-nums text-ink">{endpoint.priceUsdc} USDC</dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="font-metadata text-xs font-bold tracking-[0.08em] text-muted-ink uppercase">Powered URL</dt>
+              <dd className="mt-2 flex min-w-0 flex-wrap items-center gap-3">
+                <code className="min-w-0 max-w-full truncate rounded-control border border-border bg-cream px-3 py-2 font-mono text-sm text-ink">{endpoint.poweredUrl}</code>
+                <CopyButton value={endpoint.poweredUrl} label="Copy powered URL" copiedLabel="Copied" className="min-h-11 border-2 border-ink" />
+              </dd>
+              <dd className="mt-2 text-sm leading-relaxed text-muted-ink">Payment requirement live — callers receive a real x402 challenge here. Paid execution is not enabled yet.</dd>
+            </div>
+            <div>
+              <dt className="font-metadata text-xs font-bold tracking-[0.08em] text-muted-ink uppercase">Upstream auth</dt>
+              <dd className="mt-2 text-sm font-medium text-ink">{authLabel(endpoint)}</dd>
+            </div>
+            <div>
+              <dt className="font-metadata text-xs font-bold tracking-[0.08em] text-muted-ink uppercase">Created</dt>
+              <dd className="mt-2 text-sm font-medium text-ink">{formatEndpointDate(endpoint.createdAt)}</dd>
+            </div>
+          </dl>
+        )}
+      </section>
     </div>
   )
 }

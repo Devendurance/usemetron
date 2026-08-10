@@ -2,7 +2,8 @@ import Link from "next/link"
 import { ArrowRight, CircleDollarSign, ReceiptText, Route } from "lucide-react"
 
 import { CallLine, EmptyState, MetronReceipt, StatusBadge } from "@/components/metron"
-import { ConsoleCard, PageHeading, StatField } from "@/components/dashboard/dashboard-primitives"
+import { EarningsOverview } from "@/components/dashboard/earnings-overview"
+import { ConsoleCard, PageHeading } from "@/components/dashboard/dashboard-primitives"
 
 export default function DashboardPage() {
   return (
@@ -14,11 +15,7 @@ export default function DashboardPage() {
         action={<Link href="/dashboard/endpoints/new" className="inline-flex min-h-12 items-center gap-2 rounded-pill border-2 border-ink bg-lime px-5 text-sm font-bold text-ink hover:bg-lime-hover focus-visible:shadow-focus focus-visible:outline-none">Publish an API <ArrowRight className="size-4" aria-hidden="true" /></Link>}
       />
 
-      <section aria-label="Payment route stats" className="mt-8 grid gap-4 sm:grid-cols-3">
-        <StatField label="Paid calls" detail="Calls will appear after a route is connected." />
-        <StatField label="Settled value" detail="Settlement evidence will appear here." />
-        <StatField label="Active routes" detail="Publish your first API to begin." />
-      </section>
+      <EarningsOverview />
 
       <section className="relative mt-10 rounded-mobile-card border-2 border-ink bg-mobile-yellow p-5 pt-7 shadow-[6px_6px_0_#141414] before:absolute before:-top-3 before:left-5 before:h-3 before:w-20 before:rounded-t-md before:border-x-2 before:border-t-2 before:border-ink before:bg-mobile-purple min-[600px]:mt-8 min-[600px]:rounded-card min-[600px]:border-0 min-[600px]:bg-lime min-[600px]:p-8 min-[600px]:shadow-none min-[600px]:before:hidden">
         <p className="font-metadata text-xs font-bold tracking-[0.1em] uppercase">The paid route</p>
