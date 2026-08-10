@@ -83,7 +83,7 @@ function HeroZipperScene() {
     settleTween.current?.kill()
 
     if (reduceMotion.current || !timeline.current) {
-      updateProgress(nextProgress)
+      updateProgress(nextProgress, true)
       return
     }
 
@@ -93,6 +93,7 @@ function HeroZipperScene() {
       ease: "power3.out",
       onUpdate: () => updateProgress(currentProgress.current),
       onComplete: () => {
+        updateProgress(nextProgress, true)
         settleTween.current = null
       },
     })
@@ -232,6 +233,8 @@ function HeroZipperScene() {
           timeline.current = sceneTimeline.progress(initialVisualProgress).pause()
 
           return () => {
+            settleTween.current?.kill()
+            settleTween.current = null
             if (timeline.current === sceneTimeline) {
               timeline.current = null
             }
@@ -250,7 +253,10 @@ function HeroZipperScene() {
   )
 
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!isZipperDragStart(event.pointerType, event.button)) {
+    if (
+      activePointer.current !== null ||
+      !isZipperDragStart(event.pointerType, event.button)
+    ) {
       return
     }
 
@@ -296,6 +302,9 @@ function HeroZipperScene() {
     )
 
     isOpen.current = settledProgress === 1
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
     settleToProgress(settledProgress)
   }
 
@@ -307,12 +316,14 @@ function HeroZipperScene() {
     }
 
     event.preventDefault()
+    settleTween.current?.kill()
+    settleTween.current = null
     isOpen.current = nextProgress >= 0.5
 
     if (["Home", "End", "Enter", " "].includes(event.key)) {
       settleToProgress(nextProgress as 0 | 1)
     } else {
-      updateProgress(nextProgress)
+      updateProgress(nextProgress, true)
     }
   }
 

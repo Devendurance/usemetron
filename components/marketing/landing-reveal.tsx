@@ -23,7 +23,7 @@ function LandingReveal({ children }: LandingRevealProps) {
         container.querySelectorAll<HTMLElement>("[data-landing-reveal]")
       )
 
-      gsap.set(sections, { autoAlpha: 0, y: 20 })
+      gsap.set(sections, { opacity: 0, y: 20 })
 
       const observer = new IntersectionObserver(
         (entries) => {
@@ -33,7 +33,7 @@ function LandingReveal({ children }: LandingRevealProps) {
             }
 
             gsap.to(entry.target, {
-              autoAlpha: 1,
+              opacity: 1,
               duration: 0.45,
               ease: "power2.out",
               y: 0,
