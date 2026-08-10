@@ -10,7 +10,7 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 
-import { CallLine, MetronReceipt } from "@/components/metron"
+import { CallLine, MetronReceipt, MetronWordmark } from "@/components/metron"
 import { AuthCta } from "@/components/auth/auth-cta"
 
 import { HeroSection } from "./hero-section"
@@ -313,7 +313,7 @@ function LandingPage() {
 
       <footer className="border-t border-border">
         <div className="mx-auto flex min-h-20 w-full max-w-[1280px] flex-col justify-center gap-2 px-4 py-5 text-sm text-muted-ink sm:flex-row sm:items-center sm:justify-between sm:px-8 lg:px-12">
-          <p className="font-display font-semibold text-ink">METRON</p>
+          <MetronWordmark />
           <p>The clear payment layer for API calls.</p>
         </div>
       </footer>

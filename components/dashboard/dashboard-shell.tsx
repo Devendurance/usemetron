@@ -5,7 +5,7 @@ import { LayoutDashboard, Menu, Network, Plus, ReceiptText, Settings2, WalletCar
 import { usePathname } from "next/navigation"
 import { useState } from "react"
 
-import { BrandMark } from "@/components/metron"
+import { MetronWordmark } from "@/components/metron"
 import { MetronAccountBadge } from "@/components/auth/connect-button"
 import { Button } from "@/components/ui/button"
 import {
@@ -120,8 +120,8 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-svh bg-mobile-yellow text-ink min-[600px]:bg-cream">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-16 border-r border-border bg-clear-paper p-2 min-[600px]:flex min-[600px]:flex-col min-[1024px]:w-64 min-[1024px]:p-6">
-        <BrandMark iconOnly className="self-center min-[1024px]:hidden" />
-        <BrandMark className="hidden min-[1024px]:inline-flex" />
+        <MetronWordmark compact className="self-center min-[1024px]:hidden" />
+        <MetronWordmark className="hidden min-[1024px]:inline-flex" />
         <p className="mt-3 hidden text-sm leading-relaxed text-muted-ink min-[1024px]:block">
           Console for your paid routes and their evidence.
         </p>
@@ -136,7 +136,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       <header className="sticky top-0 z-20 flex min-h-16 items-center justify-between border-b-2 border-ink bg-mobile-yellow px-4 min-[600px]:hidden">
-        <BrandMark />
+        <MetronWordmark />
         <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
           <SheetTrigger
             render={
@@ -155,7 +155,9 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
             className="w-[min(88vw,22rem)] border-r-2 border-ink bg-mobile-surface p-0 shadow-none [&>[data-slot=sheet-close]]:size-11 [&>[data-slot=sheet-close]]:min-h-11 [&>[data-slot=sheet-close]]:min-w-11"
           >
             <SheetHeader className="border-b-2 border-ink bg-mobile-yellow p-6 pr-14">
-              <SheetTitle className="font-display text-2xl font-bold tracking-[-0.03em]">METRON</SheetTitle>
+              <SheetTitle>
+                <MetronWordmark className="text-2xl tracking-[-0.055em]" />
+              </SheetTitle>
               <SheetDescription className="text-ink/75">
                 Routes, calls, and receipts.
               </SheetDescription>
