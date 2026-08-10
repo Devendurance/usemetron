@@ -49,6 +49,7 @@ function HeroZipperScene() {
       const leftShutter = select('[data-zipper-shutter="left"]')[0]
       const rightShutter = select('[data-zipper-shutter="right"]')[0]
       const pull = select("[data-zipper-pull]")[0]
+      const zipperOrigin = select("[data-zipper-origin]")[0]
       const cards = select("[data-zipper-card]") as HTMLElement[]
       const media = gsap.matchMedia()
 
@@ -74,10 +75,19 @@ function HeroZipperScene() {
               : 6
           const timeline = gsap.timeline({ paused: true })
 
+          const zipperOriginPosition = () => {
+            const sceneBounds = scene.getBoundingClientRect()
+            const originBounds = zipperOrigin.getBoundingClientRect()
+
+            return {
+              x: originBounds.left + originBounds.width / 2 - sceneBounds.left,
+              y: originBounds.top + originBounds.height / 2 - sceneBounds.top,
+            }
+          }
           const cardClosedX = (index: number) =>
-            scene.clientWidth / 2 - cards[index].offsetLeft
+            zipperOriginPosition().x - cards[index].offsetLeft
           const cardClosedY = (index: number) =>
-            scene.clientHeight / 2 - cards[index].offsetTop
+            zipperOriginPosition().y - cards[index].offsetTop
           const cardRotation = (index: number) => readRotation(cards[index])
 
           if (reducedMotion) {
@@ -203,15 +213,42 @@ function HeroZipperScene() {
 
   return (
     <div ref={root} className={styles.scene}>
-      <div className={styles.pocket} aria-hidden="true">
-        <span
-          className={`${styles.shutter} ${styles.leftShutter}`}
-          data-zipper-shutter="left"
-        />
-        <span
-          className={`${styles.shutter} ${styles.rightShutter}`}
-          data-zipper-shutter="right"
-        />
+      <div className={styles.backLayer}>
+        <div className={styles.pocket} aria-hidden="true">
+          <span
+            className={`${styles.shutter} ${styles.leftShutter}`}
+            data-zipper-shutter="left"
+          />
+          <span
+            className={`${styles.shutter} ${styles.rightShutter}`}
+            data-zipper-shutter="right"
+          />
+        </div>
+
+        <p id="hero-preview-label" className={styles.previewLabel}>
+          Example powered URLs — demo only
+        </p>
+        <ul
+          className={styles.previewList}
+          aria-labelledby="hero-preview-label"
+          aria-describedby="hero-preview-note"
+        >
+          {PREVIEWS.map((preview) => (
+            <li key={preview} className={styles.previewCard} data-zipper-card>
+              <code>{preview}</code>
+            </li>
+          ))}
+        </ul>
+        <p id="hero-preview-note" className={styles.previewNote}>
+          No request will run.
+        </p>
+      </div>
+
+      <div
+        className={styles.zipperOverlay}
+        data-zipper-overlay
+        aria-hidden="true"
+      >
         <span className={styles.seam}>
           <span className={styles.teeth}>
             {ZIPPER_TEETH.map((tooth) => (
@@ -222,25 +259,8 @@ function HeroZipperScene() {
         <span className={styles.pull} data-zipper-pull>
           <span className={styles.pullGrip} />
         </span>
+        <span className={styles.zipperOrigin} data-zipper-origin />
       </div>
-
-      <p id="hero-preview-label" className={styles.previewLabel}>
-        Example powered URLs — demo only
-      </p>
-      <ul
-        className={styles.previewList}
-        aria-labelledby="hero-preview-label"
-        aria-describedby="hero-preview-note"
-      >
-        {PREVIEWS.map((preview) => (
-          <li key={preview} className={styles.previewCard} data-zipper-card>
-            <code>{preview}</code>
-          </li>
-        ))}
-      </ul>
-      <p id="hero-preview-note" className={styles.previewNote}>
-        No request will run.
-      </p>
     </div>
   )
 }

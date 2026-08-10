@@ -1,9 +1,14 @@
 .scene {
   position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.backLayer {
+  position: absolute;
   z-index: 0;
   inset: 0;
   overflow: hidden;
-  pointer-events: none;
   perspective: 1200px;
   contain: layout paint;
 }
@@ -42,6 +47,16 @@
   right: 0;
   border-left: 2px solid var(--metron-blueprint);
   transform: translate3d(96%, 0, 0);
+}
+
+.zipperOverlay {
+  position: absolute;
+  z-index: 20;
+  top: 50%;
+  left: min(calc(100% - 49px), calc(50% + 379px));
+  width: 44px;
+  height: min(68%, 540px);
+  transform: translate(-50%, -50%);
 }
 
 .seam {
@@ -96,6 +111,16 @@
   transform: translate3d(-50%, 126px, 0);
   transform-origin: 50% 0;
   will-change: transform;
+}
+
+.zipperOrigin {
+  position: absolute;
+  top: calc(7% + 153px);
+  left: 50%;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  transform: translateX(-50%);
 }
 
 .pullGrip {
@@ -220,6 +245,15 @@
     transform: translate3d(-50%, 100px, 0);
   }
 
+  .zipperOverlay {
+    left: min(calc(100% - 33px), calc(50% + 379px));
+    height: 70%;
+  }
+
+  .zipperOrigin {
+    top: calc(7% + 127px);
+  }
+
   .previewCard {
     width: clamp(8.75rem, 25vw, 10.25rem);
     min-height: 54px;
@@ -271,6 +305,16 @@
     width: 30px;
     height: 46px;
     transform: translate3d(-50%, 78px, 0);
+  }
+
+  .zipperOverlay {
+    left: calc(100% - 17px);
+    width: 36px;
+    height: 76%;
+  }
+
+  .zipperOrigin {
+    top: calc(7% + 101px);
   }
 
   .pullGrip {
