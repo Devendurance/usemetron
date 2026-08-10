@@ -315,7 +315,7 @@
   .zipperOverlay {
     --zipper-origin-offset: 23px;
     --zipper-pull-travel: 78px;
-    left: calc(100% - 17px);
+    left: calc(100% - 22px);
     width: 36px;
     height: 76%;
   }
