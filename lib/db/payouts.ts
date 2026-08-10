@@ -10,7 +10,7 @@
 
 import "server-only";
 
-import { and, desc, eq, inArray, isNotNull, or } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNotNull, or } from "drizzle-orm";
 
 import { db } from "./client";
 import { creatorLedgerEntries, developers, payouts, proxyRoutes, callReceipts } from "./schema";
@@ -20,6 +20,7 @@ export const PAYOUT_STATUS = {
   SUBMITTED: "SUBMITTED",
   CONFIRMED: "CONFIRMED",
   FAILED: "FAILED",
+  PENDING_RETRY: "PENDING_RETRY",
 } as const;
 
 export type PayoutRow = {
@@ -285,4 +286,68 @@ export async function listPayoutHistory(
     .orderBy(desc(payouts.created_at))
     .limit(50);
   return rows.map((row) => ({ ...mapRow(row), routeName: row.routeName }));
+}
+
+/**
+ * Single payout for one receipt, ownership-scoped. At most one row can
+ * exist per receipt (UNIQUE ledger_entry_id → UNIQUE call_receipt_id), so
+ * limit(1) is exact — a foreign receipt resolves to null, never to another
+ * creator's payout. Used by the dashboard detail view so payout evidence
+ * is never missed on older receipts (unlike a bounded history list).
+ */
+export async function getPayoutByReceipt(
+  developerId: string,
+  callReceiptId: string
+): Promise<(PayoutRow & { routeName: string }) | null> {
+  const rows = await db
+    .select({
+      id: payouts.id,
+      developer_id: payouts.developer_id,
+      call_receipt_id: payouts.call_receipt_id,
+      ledger_entry_id: payouts.ledger_entry_id,
+      from_wallet: payouts.from_wallet,
+      to_wallet: payouts.to_wallet,
+      amount_micro_usdc: payouts.amount_micro_usdc,
+      status: payouts.status,
+      attribution_tag: payouts.attribution_tag,
+      tx_hash: payouts.tx_hash,
+      attempt_count: payouts.attempt_count,
+      last_error: payouts.last_error,
+      created_at: payouts.created_at,
+      submitted_at: payouts.submitted_at,
+      confirmed_at: payouts.confirmed_at,
+      updated_at: payouts.updated_at,
+      routeName: proxyRoutes.name,
+    })
+    .from(payouts)
+    .innerJoin(callReceipts, eq(callReceipts.id, payouts.call_receipt_id))
+    .innerJoin(proxyRoutes, eq(proxyRoutes.id, callReceipts.route_id))
+    .where(
+      and(
+        eq(payouts.developer_id, developerId),
+        eq(payouts.call_receipt_id, callReceiptId)
+      )
+    )
+    .limit(1);
+  const row = rows[0];
+  return row ? { ...mapRow(row), routeName: row.routeName } : null;
+}
+
+/**
+ * Payouts that failed or are queued for retry (dashboard failure badge).
+ * PENDING_RETRY counts as a failure until the retry sweep succeeds.
+ */
+export async function failedPayoutCountByDeveloper(
+  developerId: string
+): Promise<number> {
+  const rows = await db
+    .select({ count: count() })
+    .from(payouts)
+    .where(
+      and(
+        eq(payouts.developer_id, developerId),
+        inArray(payouts.status, [PAYOUT_STATUS.FAILED, PAYOUT_STATUS.PENDING_RETRY])
+      )
+    );
+  return rows[0]?.count ?? 0;
 }

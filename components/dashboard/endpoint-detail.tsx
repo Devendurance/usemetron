@@ -8,6 +8,7 @@ import {
   Loader2,
   PenLine,
   Power,
+  ReceiptText,
   Save,
   Trash2,
 } from "lucide-react"
@@ -24,6 +25,7 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { useAuth } from "@/lib/auth/use-auth"
+import type { TransactionView } from "@/lib/dashboard/types"
 import {
   EndpointClientError,
   endpointErrorMessage,
@@ -58,6 +60,168 @@ function authLabel(endpoint: EndpointView): string {
     return `API key · ${endpoint.headerName ?? "custom header"}`
   }
   return "None"
+}
+
+type RouteTransactionsResponse = {
+  transactions: TransactionView[]
+}
+
+type RouteTransactionErrorCode =
+  | "UNAUTHENTICATED"
+  | "NOT_FOUND"
+  | "INVALID_INPUT"
+  | "INTERNAL_ERROR"
+
+class RouteTransactionClientError extends Error {
+  readonly code: RouteTransactionErrorCode
+  readonly status: number
+
+  constructor(code: RouteTransactionErrorCode, status: number) {
+    super(`Route transaction request failed with ${code}`)
+    this.name = "RouteTransactionClientError"
+    this.code = code
+    this.status = status
+  }
+}
+
+async function fetchRouteTransactions(
+  routeId: string
+): Promise<RouteTransactionsResponse> {
+  const res = await fetch(`/api/transactions?routeId=${encodeURIComponent(routeId)}`)
+  let body: unknown = null
+  try {
+    body = await res.json()
+  } catch {
+    body = null
+  }
+
+  if (!res.ok) {
+    const errorBody =
+      body && typeof body === "object" && "error" in body
+        ? (body as { error?: unknown }).error
+        : null
+    const code: RouteTransactionErrorCode =
+      errorBody === "UNAUTHENTICATED"
+        ? "UNAUTHENTICATED"
+        : errorBody === "NOT_FOUND"
+          ? "NOT_FOUND"
+          : errorBody === "INVALID_INPUT"
+            ? "INVALID_INPUT"
+            : "INTERNAL_ERROR"
+    throw new RouteTransactionClientError(code, res.status)
+  }
+
+  const transactions =
+    body && typeof body === "object" && "transactions" in body
+      ? (body as RouteTransactionsResponse).transactions
+      : null
+  if (!Array.isArray(transactions)) {
+    throw new RouteTransactionClientError("INTERNAL_ERROR", res.status)
+  }
+  return { transactions }
+}
+
+/** Truthful badge color per persisted payment status; unknown statuses stay neutral. */
+function statusVariant(status: string): "verified" | "review" | "failed" | "neutral" {
+  if (status === "SETTLED") return "verified"
+  if (status === "VERIFIED" || status === "SETTLEMENT_PENDING") return "review"
+  if (status === "UPSTREAM_FAILED" || status === "SETTLEMENT_FAILED") return "failed"
+  return "neutral"
+}
+
+function shortTx(hash: string) {
+  return `${hash.slice(0, 8)}…${hash.slice(-6)}`
+}
+
+const RECENT_CALLS_LIMIT = 5
+
+function RecentPaidCalls({ id }: { id: string }) {
+  const { refresh: refreshAuth } = useAuth()
+  const { data, isPending, isError, error, refetch } = useQuery<RouteTransactionsResponse>({
+    queryKey: ["transactions", "route", id],
+    queryFn: () => fetchRouteTransactions(id),
+    staleTime: 30_000,
+  })
+
+  const notFound =
+    error instanceof RouteTransactionClientError && error.code === "NOT_FOUND"
+  const unauthenticated =
+    error instanceof RouteTransactionClientError && error.code === "UNAUTHENTICATED"
+
+  return (
+    <section className="relative rounded-mobile-card border-2 border-ink bg-mobile-surface p-5 pt-7 shadow-[6px_6px_0_#141414] before:absolute before:-top-3 before:left-5 before:h-3 before:w-20 before:rounded-t-md before:border-x-2 before:border-t-2 before:border-ink before:bg-mobile-magenta min-[600px]:rounded-card min-[600px]:border-0 min-[600px]:bg-clear-paper min-[600px]:p-8 min-[600px]:shadow-none min-[600px]:before:hidden">
+      <div className="flex items-start gap-4">
+        <span className="flex size-11 shrink-0 items-center justify-center rounded-control bg-coral" aria-hidden="true">
+          <ReceiptText className="size-5" />
+        </span>
+        <div>
+          <h2 className="font-heading text-xl font-semibold tracking-[-0.02em]">Recent paid calls</h2>
+          <p className="mt-1 text-sm leading-relaxed text-muted-ink">The newest paid calls on this route, straight from the ledger.</p>
+        </div>
+      </div>
+
+      {isPending ? (
+        <div aria-live="polite" aria-label="Loading recent paid calls" className="mt-6 space-y-3">
+          <Skeleton className="h-14 w-full bg-cream" />
+          <Skeleton className="h-14 w-full bg-cream" />
+          <Skeleton className="h-14 w-full bg-cream" />
+        </div>
+      ) : isError || data === undefined ? (
+        notFound ? (
+          <EmptyState
+            className="mt-6"
+            title="No paid calls on this route yet."
+            description="Once a caller pays for a request and this route responds, its receipt appears here. Nothing is fabricated."
+            icon={<ReceiptText aria-hidden="true" />}
+          />
+        ) : (
+          <EmptyState
+            className="mt-6"
+            title={unauthenticated ? "Your session has expired" : "Recent paid calls are unavailable"}
+            description={unauthenticated ? "Sign in again to view call receipts for this route." : "Real call records for this route could not be loaded. Try again in a moment."}
+            icon={<ReceiptText aria-hidden="true" />}
+            action={
+              <Button type="button" onClick={() => { if (unauthenticated) refreshAuth(); void refetch() }} className="min-h-11 rounded-pill border-2 border-ink bg-lime px-5 font-bold text-ink hover:bg-lime-hover">Try again</Button>
+            }
+          />
+        )
+      ) : data.transactions.length === 0 ? (
+        <EmptyState
+          className="mt-6"
+          title="No paid calls on this route yet."
+          description="Once a caller pays for a request and this route responds, its receipt appears here. Nothing is fabricated."
+          icon={<ReceiptText aria-hidden="true" />}
+        />
+      ) : (
+        <ul className="mt-6 divide-y divide-border" aria-label="Recent paid calls">
+          {data.transactions.slice(0, RECENT_CALLS_LIMIT).map((transaction) => (
+            <li key={transaction.id} className="flex flex-wrap items-center justify-between gap-3 py-4">
+              <div className="min-w-0">
+                <Link href={`/dashboard/transactions/${transaction.id}`} className="block min-w-0 focus-visible:shadow-focus focus-visible:outline-none">
+                  <span className="block truncate font-heading text-sm font-semibold text-ink underline-offset-4 hover:underline">{formatEndpointDate(transaction.createdAt)}</span>
+                </Link>
+                {transaction.x402TxHash !== null && transaction.explorerUrl !== null ? (
+                  <a
+                    href={transaction.explorerUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={transaction.x402TxHash}
+                    className="mt-1 inline-block font-metadata text-xs text-blueprint underline underline-offset-2 hover:text-ink focus-visible:shadow-focus focus-visible:outline-none"
+                  >
+                    {shortTx(transaction.x402TxHash)}
+                  </a>
+                ) : null}
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <p className="font-display text-lg font-bold tracking-[-0.02em] tabular-nums">{transaction.amountUsdc} USDC</p>
+                <StatusBadge variant={statusVariant(transaction.paymentStatus)}>{transaction.paymentStatus}</StatusBadge>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
 }
 
 function EndpointDetail({ id }: { id: string }) {
@@ -314,6 +478,8 @@ function EndpointDetail({ id }: { id: string }) {
           </dl>
         )}
       </section>
+
+      <RecentPaidCalls id={id} />
     </div>
   )
 }

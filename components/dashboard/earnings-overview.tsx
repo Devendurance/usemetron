@@ -6,6 +6,7 @@ import { useState } from "react"
 
 import { EmptyState } from "@/components/metron"
 import { Skeleton } from "@/components/ui/skeleton"
+import { explorerTxUrl } from "@/lib/dashboard/explorer"
 import { cn } from "@/lib/utils"
 
 type EarningsResponse = {
@@ -200,7 +201,7 @@ function PayoutHistory() {
                   <>
                     {" · "}
                     <a
-                      href={`https://explorer.celo.org/tx/${p.txHash}`}
+                      href={explorerTxUrl(p.txHash)}
                       target="_blank"
                       rel="noreferrer"
                       className="underline underline-offset-2 hover:text-ink"
@@ -332,7 +333,7 @@ function EarningsOverview() {
                       <>
                         {" · "}
                         <a
-                          href={`https://explorer.celo.org/tx/${entry.x402TxHash}`}
+                          href={explorerTxUrl(entry.x402TxHash)}
                           target="_blank"
                           rel="noreferrer"
                           className="underline underline-offset-2 hover:text-ink"

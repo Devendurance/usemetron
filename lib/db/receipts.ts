@@ -9,10 +9,16 @@
 
 import "server-only";
 
-import { eq } from "drizzle-orm";
+import { and, count, desc, eq } from "drizzle-orm";
 
 import { db } from "./client";
-import { callReceipts, creatorLedgerEntries, LEDGER_TYPE, PAYMENT_STATUS } from "./schema";export type InsertVerifiedReceipt = {
+import {
+  callReceipts,
+  creatorLedgerEntries,
+  LEDGER_TYPE,
+  PAYMENT_STATUS,
+  proxyRoutes,
+} from "./schema";export type InsertVerifiedReceipt = {
   routeId: string;
   developerId: string;
   callerWallet: string | null;
@@ -161,4 +167,205 @@ export async function applySettledSettlement(
 
     return { earningCreated: rows.length > 0 };
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* Dashboard read path (M9). Every query is scoped by developer_id —   */
+/* a receipt can never leak across creators.                           */
+/* ------------------------------------------------------------------ */
+
+export type ReceiptRow = {
+  id: string;
+  routeId: string;
+  routeName: string;
+  callerWallet: string | null;
+  amountMicroUsdc: number;
+  asset: string;
+  network: string;
+  scheme: string;
+  payTo: string;
+  paymentStatus: string;
+  upstreamStatusCode: number | null;
+  upstreamLatencyMs: number | null;
+  x402TxHash: string | null;
+  errorCode: string | null;
+  verifiedAt: Date | null;
+  settledAt: Date | null;
+  createdAt: Date;
+};
+
+/** Columns shared by the dashboard read queries (route name joined in). */
+const receiptSelect = {
+  id: callReceipts.id,
+  route_id: callReceipts.route_id,
+  routeName: proxyRoutes.name,
+  caller_wallet: callReceipts.caller_wallet,
+  amount_micro_usdc: callReceipts.amount_micro_usdc,
+  asset: callReceipts.asset,
+  network: callReceipts.network,
+  scheme: callReceipts.scheme,
+  pay_to: callReceipts.pay_to,
+  payment_status: callReceipts.payment_status,
+  upstream_status_code: callReceipts.upstream_status_code,
+  upstream_latency_ms: callReceipts.upstream_latency_ms,
+  x402_tx_hash: callReceipts.x402_tx_hash,
+  error_code: callReceipts.error_code,
+  verified_at: callReceipts.verified_at,
+  settled_at: callReceipts.settled_at,
+  created_at: callReceipts.created_at,
+};
+
+type ReceiptQueryRow = Pick<
+  typeof callReceipts.$inferSelect,
+  | "id"
+  | "route_id"
+  | "caller_wallet"
+  | "amount_micro_usdc"
+  | "asset"
+  | "network"
+  | "scheme"
+  | "pay_to"
+  | "payment_status"
+  | "upstream_status_code"
+  | "upstream_latency_ms"
+  | "x402_tx_hash"
+  | "error_code"
+  | "verified_at"
+  | "settled_at"
+  | "created_at"
+> & { routeName: string | null };
+
+function mapReceiptRow(row: ReceiptQueryRow): ReceiptRow {
+  return {
+    id: row.id,
+    routeId: row.route_id,
+    // leftJoin types the route side as nullable; the FK guarantees a
+    // route exists, so a missing name is unreachable in practice.
+    routeName: row.routeName ?? "",
+    callerWallet: row.caller_wallet,
+    amountMicroUsdc: row.amount_micro_usdc,
+    asset: row.asset,
+    network: row.network,
+    scheme: row.scheme,
+    payTo: row.pay_to,
+    paymentStatus: row.payment_status,
+    upstreamStatusCode: row.upstream_status_code,
+    upstreamLatencyMs: row.upstream_latency_ms,
+    x402TxHash: row.x402_tx_hash,
+    errorCode: row.error_code,
+    verifiedAt: row.verified_at,
+    settledAt: row.settled_at,
+    createdAt: row.created_at,
+  };
+}
+
+/** Newest-first receipts for a creator's dashboard list. */
+export async function listReceiptsByDeveloper(
+  developerId: string,
+  limit: number
+): Promise<ReceiptRow[]> {
+  const rows = await db
+    .select(receiptSelect)
+    .from(callReceipts)
+    .leftJoin(proxyRoutes, eq(proxyRoutes.id, callReceipts.route_id))
+    .where(eq(callReceipts.developer_id, developerId))
+    .orderBy(desc(callReceipts.created_at))
+    .limit(limit);
+  return rows.map(mapReceiptRow);
+}
+
+/**
+ * Single receipt by id, ownership-scoped: a foreign receipt id resolves to
+ * null, never to another creator's data.
+ */
+export async function getReceiptById(
+  developerId: string,
+  receiptId: string
+): Promise<ReceiptRow | null> {
+  const [row] = await db
+    .select(receiptSelect)
+    .from(callReceipts)
+    .leftJoin(proxyRoutes, eq(proxyRoutes.id, callReceipts.route_id))
+    .where(
+      and(
+        eq(callReceipts.developer_id, developerId),
+        eq(callReceipts.id, receiptId)
+      )
+    )
+    .limit(1);
+  return row ? mapReceiptRow(row) : null;
+}
+
+/** Newest-first receipts for one route (endpoint detail view). */
+export async function listReceiptsByRoute(
+  developerId: string,
+  routeId: string,
+  limit: number
+): Promise<ReceiptRow[]> {
+  const rows = await db
+    .select(receiptSelect)
+    .from(callReceipts)
+    .leftJoin(proxyRoutes, eq(proxyRoutes.id, callReceipts.route_id))
+    .where(
+      and(
+        eq(callReceipts.developer_id, developerId),
+        eq(callReceipts.route_id, routeId)
+      )
+    )
+    .orderBy(desc(callReceipts.created_at))
+    .limit(limit);
+  return rows.map(mapReceiptRow);
+}
+
+export type ReceiptCounts = {
+  settled: number;
+  verified: number;
+  upstreamFailed: number;
+  settlementFailed: number;
+  settlementPending: number;
+  total: number;
+};
+
+/** Per-status receipt counts for a creator, zero-defaulted. */
+export async function receiptCountsByDeveloper(
+  developerId: string
+): Promise<ReceiptCounts> {
+  const rows = await db
+    .select({
+      paymentStatus: callReceipts.payment_status,
+      count: count(),
+    })
+    .from(callReceipts)
+    .where(eq(callReceipts.developer_id, developerId))
+    .groupBy(callReceipts.payment_status);
+
+  const counts: ReceiptCounts = {
+    settled: 0,
+    verified: 0,
+    upstreamFailed: 0,
+    settlementFailed: 0,
+    settlementPending: 0,
+    total: 0,
+  };
+  for (const row of rows) {
+    counts.total += row.count;
+    switch (row.paymentStatus) {
+      case PAYMENT_STATUS.SETTLED:
+        counts.settled = row.count;
+        break;
+      case PAYMENT_STATUS.VERIFIED:
+        counts.verified = row.count;
+        break;
+      case PAYMENT_STATUS.UPSTREAM_FAILED:
+        counts.upstreamFailed = row.count;
+        break;
+      case PAYMENT_STATUS.SETTLEMENT_FAILED:
+        counts.settlementFailed = row.count;
+        break;
+      case PAYMENT_STATUS.SETTLEMENT_PENDING:
+        counts.settlementPending = row.count;
+        break;
+    }
+  }
+  return counts;
 }
