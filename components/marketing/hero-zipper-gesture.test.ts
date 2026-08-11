@@ -2,22 +2,26 @@ import { describe, expect, it } from "vitest"
 
 import {
   getKeyboardProgress,
-  getSettledZipperEndpoint,
   getProgressFromVerticalDrag,
+  getProgressFromVerticalWheel,
+  getSettledZipperEndpoint,
   isZipperDragStart,
+  isMostlyHorizontalWheelGesture,
+  normalizeWheelDelta,
   resolvePointerEndProgress,
   settleZipperProgress,
 } from "./hero-zipper-gesture"
 
 describe("isZipperDragStart", () => {
-  it("accepts only the secondary mouse button for mouse input", () => {
-    expect(isZipperDragStart("mouse", 2)).toBe(true)
+  it("rejects all mouse buttons", () => {
     expect(isZipperDragStart("mouse", 0)).toBe(false)
     expect(isZipperDragStart("mouse", 1)).toBe(false)
+    expect(isZipperDragStart("mouse", 2)).toBe(false)
   })
 
-  it("accepts touch input and rejects unspecified pointer types", () => {
+  it("accepts touch primary-button input and rejects other pointer types", () => {
     expect(isZipperDragStart("touch", 0)).toBe(true)
+    expect(isZipperDragStart("touch", 1)).toBe(false)
     expect(isZipperDragStart("pen", 0)).toBe(false)
   })
 })
@@ -32,6 +36,40 @@ describe("getProgressFromVerticalDrag", () => {
     expect(getProgressFromVerticalDrag(0.8, 50, 100)).toBe(1)
     expect(getProgressFromVerticalDrag(0.2, -50, 100)).toBe(0)
     expect(getProgressFromVerticalDrag(0.4, 50, 0)).toBe(0.4)
+  })
+})
+
+describe("normalizeWheelDelta", () => {
+  it("keeps pixel deltas unchanged and converts line/page deltas", () => {
+    expect(normalizeWheelDelta(8, 40, 0)).toEqual({ deltaX: 8, deltaY: 40 })
+    expect(normalizeWheelDelta(1, 3, 1, 20)).toEqual({
+      deltaX: 20,
+      deltaY: 60,
+    })
+    expect(normalizeWheelDelta(0, -1, 2, 16, 900)).toEqual({
+      deltaX: 0,
+      deltaY: -900,
+    })
+  })
+})
+
+describe("isMostlyHorizontalWheelGesture", () => {
+  it("rejects mostly horizontal wheel intent", () => {
+    expect(isMostlyHorizontalWheelGesture(50, 25)).toBe(true)
+    expect(isMostlyHorizontalWheelGesture(24, 25)).toBe(false)
+  })
+})
+
+describe("getProgressFromVerticalWheel", () => {
+  it("opens on downward wheel movement and closes on upward movement", () => {
+    expect(getProgressFromVerticalWheel(0.25, 100, 100)).toBe(0.5)
+    expect(getProgressFromVerticalWheel(0.75, -100, 100)).toBe(0.5)
+  })
+
+  it("clamps progress at the endpoints and ignores unusable travel", () => {
+    expect(getProgressFromVerticalWheel(0.95, 80, 100)).toBe(1)
+    expect(getProgressFromVerticalWheel(0.05, -80, 100)).toBe(0)
+    expect(getProgressFromVerticalWheel(0.4, 80, 0)).toBe(0.4)
   })
 })
 

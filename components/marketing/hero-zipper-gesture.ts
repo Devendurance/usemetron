@@ -1,11 +1,15 @@
 type PointerKind = "mouse" | "touch" | "pen" | string
 
+const DEFAULT_WHEEL_LINE_HEIGHT = 16
+const DEFAULT_WHEEL_PAGE_HEIGHT = 800
+const WHEEL_PROGRESS_TRAVEL_MULTIPLIER = 4
+
 function clampProgress(progress: number) {
   return Math.min(1, Math.max(0, progress))
 }
 
 function isZipperDragStart(pointerType: PointerKind, button: number) {
-  return pointerType === "touch" || (pointerType === "mouse" && button === 2)
+  return pointerType === "touch" && button === 0
 }
 
 function getProgressFromVerticalDrag(
@@ -24,6 +28,40 @@ function settleZipperProgress(wasOpen: boolean, progress: number) {
   const clampedProgress = clampProgress(progress)
 
   return wasOpen ? (clampedProgress <= 0.3 ? 0 : 1) : clampedProgress >= 0.7 ? 1 : 0
+}
+
+function normalizeWheelDelta(
+  deltaX: number,
+  deltaY: number,
+  deltaMode: number,
+  lineHeight = DEFAULT_WHEEL_LINE_HEIGHT,
+  pageHeight = DEFAULT_WHEEL_PAGE_HEIGHT
+) {
+  const scale =
+    deltaMode === 1 ? lineHeight : deltaMode === 2 ? pageHeight : 1
+
+  return {
+    deltaX: deltaX * scale,
+    deltaY: deltaY * scale,
+  }
+}
+
+function isMostlyHorizontalWheelGesture(deltaX: number, deltaY: number) {
+  return Math.abs(deltaX) > Math.abs(deltaY)
+}
+
+function getProgressFromVerticalWheel(
+  startProgress: number,
+  deltaY: number,
+  travelDistance: number
+) {
+  if (travelDistance <= 0 || deltaY === 0) {
+    return clampProgress(startProgress)
+  }
+
+  return clampProgress(
+    startProgress + deltaY / (travelDistance * WHEEL_PROGRESS_TRAVEL_MULTIPLIER)
+  )
 }
 
 function getSettledZipperEndpoint(
@@ -70,8 +108,11 @@ function getKeyboardProgress(key: string, progress: number) {
 export {
   getKeyboardProgress,
   getProgressFromVerticalDrag,
+  getProgressFromVerticalWheel,
   getSettledZipperEndpoint,
   isZipperDragStart,
+  isMostlyHorizontalWheelGesture,
+  normalizeWheelDelta,
   resolvePointerEndProgress,
   settleZipperProgress,
 }
