@@ -41,6 +41,12 @@ Durable engineering decisions and discovered lessons. Not task status.
 - **Logger stages cover the full PRD §23 list** (payment_verified → response_delivered, plus extras: settlement_pending/persist_failed, payout_skipped, settlement_disabled, upstream_skipped_body_too_large, rate_limit_degraded).
 - **Replay/429 shape.** Signed-attempt replay remains 409 `PAYMENT_REPLAY` (durable precheck before /verify); rate limiting returns 429 `RATE_LIMITED` + `retry-after` — a 429 is a deliberate, retryable signal for over-limit signed attempts, not an outage (documented trade-off vs a 502).
 
+## M11.1 decisions (upstream auth)
+
+- **Upstream auth is configurable per route**: `BEARER` or `API_KEY` with any header name (e.g. `CMC_API_KEY` or `x-api-key`). The route auth edit UI has explicit Preserve / Replace / Clear semantics — editing a route never silently mutates or drops the encrypted credential.
+- **Live upstream verification is operator-env-only.** `CMC_API_KEY=<key> npm run verify:upstream:live` drives the REAL production chain (runtime SSRF pin → decrypt → creator-header injection → pinned transport) against the real CoinMarketCap upstream. The key is read from the environment only and must never be committed, logged, or written to any file; the script prints only the header name and a sha256 fingerprint/length.
+- **CoinMarketCap gotcha (M11.1 live run):** CMC's official credential header is `X-CMC_PRO_API_KEY`, not `CMC_API_KEY` — the key returned 401 under the wrong header name and 200 under the official one (Metron's injection was correct in both cases; the header name is a creator-side configuration choice). The live script defaults to the official header and accepts a `CMC_AUTH_HEADER` override.
+
 ## M10 decisions (automatic exact-earning payout handoff)
 
 - The payout handoff is exact-earning: `reserveEarningForPayout` locks the SINGLE EARNING row of the receipt (FOR UPDATE, type=EARNING, developer-scoped) and inserts the payout. Any existing payout row for that earning — ANY status — makes the reserve return null and the handoff reports `already_handled`; at most one payout per earning, ever, no re-broadcast.

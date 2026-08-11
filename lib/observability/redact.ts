@@ -39,9 +39,18 @@ function normalizeKey(key: string): string {
 
 const SENSITIVE_NORMALIZED: readonly string[] = [...SENSITIVE_KEYS].map(normalizeKey);
 
-function isSensitiveKey(key: string): boolean {
+function isSensitiveKey(
+  key: string,
+  extraNormalized: readonly string[] = []
+): boolean {
   const normalized = normalizeKey(key);
-  return SENSITIVE_NORMALIZED.some((word) => normalized.includes(word));
+  return (
+    SENSITIVE_NORMALIZED.some((word) => normalized.includes(word)) ||
+    // M11.1: creator-configured header names (e.g. `X-Custom-Key`) can
+    // contain no built-in sensitive substring; extra keys close that hole
+    // with the same normalize-and-match semantics.
+    extraNormalized.some((word) => normalized.includes(word))
+  );
 }
 
 /**
@@ -58,20 +67,23 @@ export function scrubUrlCredentials(value: string): string {
  * Returns a copy of `record` safe to serialize: any string value that
  * exactly matches or contains a configured secret is replaced wholesale
  * with [REDACTED]; URL userinfo passwords are scrubbed in place; values
- * under sensitive keys are always replaced. Non-string values and unknown
- * keys pass through untouched. Never throws.
+ * under sensitive keys (built-in or `extraSensitiveKeys`) are always
+ * replaced. Non-string values and unknown keys pass through untouched.
+ * Never throws.
  */
 export function redactFields(
   record: Record<string, unknown>,
-  secretValues: readonly string[]
+  secretValues: readonly string[],
+  extraSensitiveKeys: readonly string[] = []
 ): Record<string, unknown> {
   if (record === null || typeof record !== "object") {
     return {};
   }
 
+  const extraNormalized: readonly string[] = extraSensitiveKeys.map(normalizeKey);
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(record)) {
-    result[key] = redactValue(key, value, secretValues);
+    result[key] = redactValue(key, value, secretValues, extraNormalized);
   }
   return result;
 }
@@ -79,14 +91,15 @@ export function redactFields(
 function redactValue(
   key: string,
   value: unknown,
-  secretValues: readonly string[]
+  secretValues: readonly string[],
+  extraNormalized: readonly string[]
 ): unknown {
-  if (isSensitiveKey(key)) {
+  if (isSensitiveKey(key, extraNormalized)) {
     return REDACTED;
   }
   if (Array.isArray(value)) {
     // ONE level of recursion: nested array items are redacted as leaves.
-    return value.map((item) => redactLeaf(key, item, secretValues));
+    return value.map((item) => redactLeaf(key, item, secretValues, extraNormalized));
   }
   if (isPlainObject(value)) {
     // ONE level of recursion: nested object entries are redacted as
@@ -94,11 +107,11 @@ function redactValue(
     // structures never recurse, so circular references cannot loop).
     const result: Record<string, unknown> = {};
     for (const [nestedKey, nestedValue] of Object.entries(value)) {
-      result[nestedKey] = redactLeaf(nestedKey, nestedValue, secretValues);
+      result[nestedKey] = redactLeaf(nestedKey, nestedValue, secretValues, extraNormalized);
     }
     return result;
   }
-  return redactLeaf(key, value, secretValues);
+  return redactLeaf(key, value, secretValues, extraNormalized);
 }
 
 /**
@@ -109,9 +122,10 @@ function redactValue(
 function redactLeaf(
   key: string,
   value: unknown,
-  secretValues: readonly string[]
+  secretValues: readonly string[],
+  extraNormalized: readonly string[]
 ): unknown {
-  if (isSensitiveKey(key)) {
+  if (isSensitiveKey(key, extraNormalized)) {
     return REDACTED;
   }
   if (typeof value !== "string") {

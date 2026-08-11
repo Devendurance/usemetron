@@ -112,6 +112,21 @@ describe("redactFields", () => {
     expect(result).toEqual(input);
   });
 
+  it.each([
+    ["x-api-key", "cmc-test-key-dummy"],
+    ["api-key", "cmc-test-key-dummy"],
+    ["authorization", "Bearer sk-test-dummy-value"],
+    ["CMC_API_KEY", "cmc-test-key-dummy"],
+    ["bearer_token", "sk-test-dummy-value"],
+  ] as const)(
+    "serialized output redacts a secret-looking value under %s and never leaks it",
+    (name, value) => {
+      const serialized = JSON.stringify(redactFields({ [name]: value }, []));
+      expect(serialized).toContain("[REDACTED]");
+      expect(serialized).not.toContain(value);
+    }
+  );
+
   it("matches sensitive keys case-insensitively and through punctuation", () => {
     const result = redactFields(
       { "x-api-key": "k1", "PAYMENT-SIGNATURE": "sig", Authorization: "a", private_key: "pk" },
@@ -162,6 +177,52 @@ describe("redactFields", () => {
 
     expect(() => redactFields(null as unknown as Record<string, unknown>, [])).not.toThrow();
     expect(redactFields(null as unknown as Record<string, unknown>, [])).toEqual({});
+  });
+});
+
+describe("redactFields — extraSensitiveKeys (creator-configured header names)", () => {
+  it("redacts a registered custom header name that contains no sensitive substring", () => {
+    // `X-Custom-Key` normalizes to `xcustomkey` — none of the built-in
+    // sensitive words appear inside it, so only the extra key list can
+    // catch it (M11.1: creator-configured header names were the hole).
+    const serialized = JSON.stringify(
+      redactFields({ "X-Custom-Key": "sk_creator_secret" }, [], ["X-Custom-Key"])
+    );
+    expect(serialized).toContain("[REDACTED]");
+    expect(serialized).not.toContain("sk_creator_secret");
+  });
+
+  it("matches extra sensitive keys case-insensitively and through punctuation", () => {
+    const result = redactFields(
+      { "x-custom-key": "v1", "X-OTHER_HEADER": "v2" },
+      [],
+      ["X-Custom-Key", "x-other-header"]
+    );
+    expect(result["x-custom-key"]).toBe("[REDACTED]");
+    expect(result["X-OTHER_HEADER"]).toBe("[REDACTED]");
+  });
+
+  it("leaves unregistered custom header names untouched", () => {
+    const result = redactFields({ "X-Custom-Key": "sk_creator_secret" }, []);
+    expect(result["X-Custom-Key"]).toBe("sk_creator_secret");
+  });
+
+  it("redacts a registered secret value appearing inside any field", () => {
+    // A hypothetical request-header dump: the field key is not sensitive,
+    // so only the registered secret VALUE catches it.
+    const serialized = JSON.stringify(
+      redactFields(
+        { headers: { "x-request-dump": "authorization: Bearer sk_creator_secret" } },
+        ["sk_creator_secret"]
+      )
+    );
+    expect(serialized).toContain("[REDACTED]");
+    expect(serialized).not.toContain("sk_creator_secret");
+  });
+
+  it("does not throw when extraSensitiveKeys is omitted", () => {
+    expect(() => redactFields({ apiKey: "x" }, [])).not.toThrow();
+    expect(redactFields({ apiKey: "x" }, [])).toEqual({ apiKey: "[REDACTED]" });
   });
 });
 

@@ -39,7 +39,10 @@ const FORBIDDEN_HEADER_NAMES = new Set([
   "x-forwarded-host",
   "x-forwarded-proto",
   "x-real-ip",
-  "x-api-key",
+  // x-api-key is intentionally NOT forbidden: the gateway strips any
+  // caller-supplied x-api-key (headers.ts DENY_HEADERS) and injects the
+  // creator's configured value AFTER filtering, so a caller can never
+  // override it. PRD §11 names X-API-Key as a common form.
   "x-metron-receipt-id",
   "payment-required",
   "payment-signature",

@@ -1,10 +1,21 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The logger is server-only; vitest resolves node conditions, so the
 // guard module must be neutralized for the test import graph.
 vi.mock("server-only", () => ({}));
 
 import { logEvent } from "./logger";
+import {
+  registerSecret,
+  registerSensitiveKey,
+  resetRegistry,
+} from "./secret-registry";
+
+beforeEach(() => {
+  // The registry is module-global; reset so suite order cannot leak
+  // registered secrets into other tests (or vice versa).
+  resetRegistry();
+});
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -109,6 +120,50 @@ describe("logEvent", () => {
     expect(parsed.receiptId).toBe("r1");
     expect(parsed.developerId).toBe("d1");
     expect(parsed.db).toBe("postgres://metron:[REDACTED]@db.example.com:5432/metron");
+    spy.mockRestore();
+  });
+
+  it("redacts a registered creator secret value that is not an env var", () => {
+    registerSecret("sk_creator_secret");
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    logEvent("upstream_started", {
+      receiptId: "r1",
+      dump: "Bearer sk_creator_secret",
+    });
+    const line = capturedOutput();
+    expect(line).not.toContain("sk_creator_secret");
+    const parsed = JSON.parse(line) as Record<string, unknown>;
+    expect(parsed.dump).toBe("[REDACTED]");
+    spy.mockRestore();
+  });
+
+  it("redacts a registered custom header name with a secret-looking value", () => {
+    registerSensitiveKey("X-Custom-Key");
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    logEvent("upstream_started", {
+      receiptId: "r1",
+      "X-Custom-Key": "sk_creator_secret",
+    });
+    const line = capturedOutput();
+    expect(line).not.toContain("sk_creator_secret");
+    const parsed = JSON.parse(line) as Record<string, unknown>;
+    expect(parsed["X-Custom-Key"]).toBe("[REDACTED]");
+    spy.mockRestore();
+  });
+
+  it("leaks nothing when the registry is empty", () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    logEvent("upstream_started", {
+      receiptId: "r1",
+      "X-Custom-Key": "sk_creator_secret",
+    });
+    const line = capturedOutput();
+    // Without a registration the value passes through (defense-in-depth
+    // only kicks in when the creator credential was actually decrypted).
+    expect(line).toContain("sk_creator_secret");
     spy.mockRestore();
   });
 });

@@ -14,6 +14,7 @@
     "db:migrate": "drizzle-kit migrate",
     "verify:foundation": "tsx --conditions=react-server --env-file=.env scripts/verify-foundation.ts",
     "verify:m9": "tsx --conditions=react-server --env-file=.env scripts/verify-m9-dashboard.ts",
+    "verify:upstream:live": "tsx --conditions=react-server --env-file=.env scripts/verify-upstream-live.mjs",
     "reconcile:ledger": "tsx --conditions=react-server --env-file=.env scripts/reconcile-ledger.ts"
   },
   "dependencies": {

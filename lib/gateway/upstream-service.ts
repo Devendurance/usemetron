@@ -92,6 +92,15 @@ export type UpstreamServiceDeps = {
   timeoutMs?: number;
   maxResponseBytes?: number;
   now?: () => number;
+  /**
+   * Invoked immediately after a successful decrypt of the creator
+   * credential, before injection (M11.1). The caller registers the
+   * plaintext with the log redactor so a decrypted secret that later
+   * appears in a log field is still redacted. Never invoked for NONE
+   * routes or when decryption fails. `headerName` is null for BEARER
+   * auth, the configured header name for API_KEY auth.
+   */
+  onDecrypt?: (info: { plaintext: string; headerName: string | null }) => void;
 };
 
 export type UpstreamService = ReturnType<typeof createUpstreamService>;
@@ -166,22 +175,25 @@ export function createUpstreamService(deps: UpstreamServiceDeps = {}) {
 
     // 3. Header policy: filter caller headers, then inject creator auth.
     const filtered = filterCallerHeaders(input.callerHeaders);
-    const auth: UpstreamHeaders =
-      input.route.encryptedUpstreamAuth === null
-        ? {}
-        : creatorAuthHeaders(
-            (() => {
-              const decrypted = decryptUpstreamSecret(
-                input.route.encryptedUpstreamAuth,
-                input.encryptionKey
-              );
-              return {
-                authType: decrypted.authType,
-                headerName: decrypted.headerName ?? "",
-                secret: decrypted.secret,
-              };
-            })()
-          );
+    let auth: UpstreamHeaders = {};
+    if (input.route.encryptedUpstreamAuth !== null) {
+      const decrypted = decryptUpstreamSecret(
+        input.route.encryptedUpstreamAuth,
+        input.encryptionKey
+      );
+      // M11.1: register the plaintext (and, for API_KEY, the configured
+      // header name) with the log redactor BEFORE injection. Never
+      // reached when decryption fails — the throw propagates above.
+      deps.onDecrypt?.({
+        plaintext: decrypted.secret,
+        headerName: decrypted.headerName ?? null,
+      });
+      auth = creatorAuthHeaders({
+        authType: decrypted.authType,
+        headerName: decrypted.headerName ?? "",
+        secret: decrypted.secret,
+      });
+    }
     const headers: UpstreamHeaders = {
       ...filtered,
       ...auth,

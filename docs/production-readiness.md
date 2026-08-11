@@ -81,3 +81,4 @@ Protected surfaces and default policies (source of truth: `lib/ratelimit/policy.
 - SSRF validation extended (CGNAT 100.64/10, benchmarking 198.18/15, multicast, reserved, IPv6 multicast/doc ranges) + DNS-resolution tests.
 - Payout wallet lock (Redis, fail-open) for nonce-safe serialized broadcasts.
 - Re-verified read-only: M10 settlement/payout records and accounting (earned = paid = 0.002 USDC, outstanding 0, switches false).
+- Upstream auth E2E-verified against the live CoinMarketCap upstream (`CMC_API_KEY=<...> npm run verify:upstream:live`; operator-env-only — the key is never committed or printed).

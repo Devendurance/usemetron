@@ -44,6 +44,7 @@ function makeService(
     resolveAddresses?: UpstreamServiceDeps["resolveAddresses"];
     timeoutMs?: number;
     maxResponseBytes?: number;
+    onDecrypt?: UpstreamServiceDeps["onDecrypt"];
   } = {}
 ) {
   const transport = overrides.transport ?? vi.fn(okTransport(200, Buffer.from("{}")));
@@ -55,6 +56,7 @@ function makeService(
     resolveAddresses,
     timeoutMs: overrides.timeoutMs,
     maxResponseBytes: overrides.maxResponseBytes,
+    onDecrypt: overrides.onDecrypt,
   });
   return { service, transport, resolveAddresses };
 }
@@ -346,6 +348,61 @@ describe("upstream service — execution results", () => {
     const { service } = makeService();
     const result = await service.executeUpstream(baseInput);
     expect(result.kind).toBe("success");
+  });
+});
+
+describe("upstream service — onDecrypt registration hook (M11.1)", () => {
+  it("calls onDecrypt with the plaintext and a null headerName after a BEARER decrypt", async () => {
+    const onDecrypt = vi.fn();
+    const { service, transport } = makeService({ onDecrypt });
+    await service.executeUpstream({
+      ...baseInput,
+      route: { ...ROUTE, encryptedUpstreamAuth: BEARER_ENCRYPTED },
+    });
+    expect(onDecrypt).toHaveBeenCalledTimes(1);
+    expect(onDecrypt).toHaveBeenCalledWith({
+      plaintext: "sk_creator_secret",
+      headerName: null,
+    });
+    // The hook fires BEFORE injection: the auth header still reaches the
+    // upstream exactly as before.
+    const args = (transport as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[];
+    const params = args[0] as { headers: Record<string, string> };
+    expect(params.headers.authorization).toBe("Bearer sk_creator_secret");
+  });
+
+  it("calls onDecrypt with the plaintext and the header name after an API_KEY decrypt", async () => {
+    const onDecrypt = vi.fn();
+    const { service } = makeService({ onDecrypt });
+    await service.executeUpstream({
+      ...baseInput,
+      route: { ...ROUTE, encryptedUpstreamAuth: API_KEY_ENCRYPTED },
+    });
+    expect(onDecrypt).toHaveBeenCalledTimes(1);
+    expect(onDecrypt).toHaveBeenCalledWith({
+      plaintext: "k-creator-1",
+      headerName: "X-Creator-Key",
+    });
+  });
+
+  it("never calls onDecrypt when the route has no auth", async () => {
+    const onDecrypt = vi.fn();
+    const { service } = makeService({ onDecrypt });
+    await service.executeUpstream(baseInput);
+    expect(onDecrypt).not.toHaveBeenCalled();
+  });
+
+  it("never calls onDecrypt when decryption fails", async () => {
+    const onDecrypt = vi.fn();
+    const { service } = makeService({ onDecrypt });
+    const tampered = BEARER_ENCRYPTED.slice(0, -1); // corrupt the envelope
+    await expect(
+      service.executeUpstream({
+        ...baseInput,
+        route: { ...ROUTE, encryptedUpstreamAuth: tampered },
+      })
+    ).rejects.toThrow();
+    expect(onDecrypt).not.toHaveBeenCalled();
   });
 });
 

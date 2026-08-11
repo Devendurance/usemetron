@@ -10,6 +10,7 @@ import {
   Power,
   ReceiptText,
   Save,
+  ShieldCheck,
   Trash2,
 } from "lucide-react"
 import { FormEvent, useState } from "react"
@@ -20,7 +21,7 @@ import { CopyButton } from "@/components/metron/copy-button"
 import { StatusBadge } from "@/components/metron/status-badge"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
@@ -36,18 +37,31 @@ import {
   parseUpstreamUrl,
   retireEndpoint,
   updateEndpoint,
+  type EndpointAuthInput,
   type EndpointView,
   type UpdateEndpointPatch,
 } from "@/lib/endpoints/client"
 import { cn } from "@/lib/utils"
+
+type AuthType = "none" | "bearer" | "apiKey"
 
 type EditValues = {
   name: string
   description: string
   upstreamUrl: string
   priceUsdc: string
+  authType: AuthType
+  bearerSecret: string
+  apiHeaderName: string
+  apiSecret: string
 }
 type EditErrors = Partial<Record<keyof EditValues, string>>
+
+const EDIT_AUTH_OPTIONS: Array<{ value: AuthType; label: string }> = [
+  { value: "none", label: "None" },
+  { value: "bearer", label: "Bearer token" },
+  { value: "apiKey", label: "API key" },
+]
 
 function authLabel(endpoint: EndpointView): string {
   if (!endpoint.hasUpstreamAuth || endpoint.upstreamAuthType === "NONE") {
@@ -269,6 +283,17 @@ function EndpointDetail({ id }: { id: string }) {
       description: endpoint.description ?? "",
       upstreamUrl: endpoint.upstreamUrl,
       priceUsdc: endpoint.priceUsdc,
+      authType:
+        endpoint.upstreamAuthType === "BEARER"
+          ? "bearer"
+          : endpoint.upstreamAuthType === "API_KEY"
+            ? "apiKey"
+            : "none",
+      // Secrets are never re-populated from the stored endpoint; the form
+      // only ever shows the configured state, never the secret itself.
+      bearerSecret: "",
+      apiHeaderName: endpoint.headerName ?? "",
+      apiSecret: "",
     })
     setDraftErrors({})
     setEditing(true)
@@ -280,14 +305,24 @@ function EndpointDetail({ id }: { id: string }) {
     setEditing(false)
   }
 
-  function updateDraft(field: keyof EditValues, value: string) {
+  function updateDraft(field: Exclude<keyof EditValues, "authType">, value: string) {
     setDraft((current) => (current ? { ...current, [field]: value } : current))
     setDraftErrors((current) => ({ ...current, [field]: undefined }))
   }
 
+  function changeEditAuthType(next: AuthType) {
+    setDraft((current) => (current ? { ...current, authType: next } : current))
+    setDraftErrors((current) => ({
+      ...current,
+      bearerSecret: undefined,
+      apiHeaderName: undefined,
+      apiSecret: undefined,
+    }))
+  }
+
   function saveEdit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!draft) return
+    if (!draft || !endpoint) return
     const nextErrors: EditErrors = {}
     if (!draft.name.trim()) nextErrors.name = "Enter a name for this endpoint."
     if (!parseUpstreamUrl(draft.upstreamUrl)) {
@@ -297,6 +332,51 @@ function EndpointDetail({ id }: { id: string }) {
     if (micros === null || micros <= 0) {
       nextErrors.priceUsdc = "Enter a price greater than zero."
     }
+
+    // Auth patch semantics mirror the PATCH contract in service.update:
+    // undefined = preserve, null = clear, object = replace.
+    const currentType = endpoint.upstreamAuthType
+    const sameMode =
+      draft.authType ===
+      (currentType === "BEARER" ? "bearer" : currentType === "API_KEY" ? "apiKey" : "none")
+    const currentHasAuth = endpoint.hasUpstreamAuth && currentType !== "NONE"
+
+    let auth: EndpointAuthInput | null | undefined
+    if (draft.authType === "none") {
+      // Clear only when there is something to clear; otherwise omit.
+      auth = currentHasAuth ? null : undefined
+    } else if (draft.authType === "bearer") {
+      if (sameMode && !draft.bearerSecret.trim()) {
+        // Same mode with a blank secret: keep the existing credential.
+        auth = undefined
+      } else {
+        if (!draft.bearerSecret.trim()) {
+          nextErrors.bearerSecret = "Enter the bearer token to send to your upstream."
+        }
+        auth = { type: "bearer", secret: draft.bearerSecret.trim() }
+      }
+    } else {
+      const headerName = draft.apiHeaderName.trim()
+      if (sameMode && !draft.apiSecret.trim()) {
+        if (headerName.toLowerCase() === (endpoint.headerName ?? "").toLowerCase()) {
+          // Same mode, same header, blank secret: keep the existing key.
+          auth = undefined
+        } else {
+          // Changing the header name requires the key too, so the change is
+          // never silently dropped.
+          nextErrors.apiSecret = "Enter the API key value to change the header name."
+        }
+      } else {
+        if (!headerName) {
+          nextErrors.apiHeaderName = "Enter the header name to send your key in."
+        }
+        if (!draft.apiSecret.trim()) {
+          nextErrors.apiSecret = "Enter the API key value."
+        }
+        auth = { type: "apiKey", headerName, secret: draft.apiSecret.trim() }
+      }
+    }
+
     setDraftErrors(nextErrors)
     if (Object.keys(nextErrors).length > 0) return
 
@@ -306,6 +386,7 @@ function EndpointDetail({ id }: { id: string }) {
         description: draft.description.trim() || null,
         upstreamUrl: draft.upstreamUrl.trim(),
         priceUsdc: draft.priceUsdc.trim(),
+        ...(auth !== undefined ? { auth } : {}),
       },
       { onSuccess: cancelEditing }
     )
@@ -439,6 +520,61 @@ function EndpointDetail({ id }: { id: string }) {
                 <FieldLabel htmlFor="edit-price">Flat price per request <span aria-hidden="true">*</span><span className="sr-only"> required</span></FieldLabel>
                 <Input id="edit-price" required inputMode="decimal" value={draft?.priceUsdc ?? ""} onChange={(event) => updateDraft("priceUsdc", event.target.value)} aria-invalid={Boolean(draftErrors.priceUsdc)} className="min-h-11 rounded-control border-2 border-ink bg-cream px-4" placeholder="0.005" />
                 {draftErrors.priceUsdc && <FieldError id="edit-price-error">{draftErrors.priceUsdc}</FieldError>}
+              </Field>
+              <Field data-invalid={Boolean(draftErrors.bearerSecret || draftErrors.apiHeaderName || draftErrors.apiSecret)}>
+                <FieldLabel htmlFor="edit-upstream-auth">Upstream authentication</FieldLabel>
+                <div id="edit-upstream-auth" role="group" aria-label="Upstream authentication type" className="flex flex-wrap gap-2">
+                  {EDIT_AUTH_OPTIONS.map((option) => (
+                    <Button
+                      key={option.value}
+                      type="button"
+                      variant={draft?.authType === option.value ? "default" : "outline"}
+                      className="min-h-11 rounded-pill border-2 border-ink px-4 font-bold"
+                      onClick={() => changeEditAuthType(option.value)}
+                      aria-pressed={draft?.authType === option.value}
+                    >
+                      {option.label}
+                    </Button>
+                  ))}
+                </div>
+
+                {draft?.authType === "bearer" && (
+                  <div className="mt-4 w-full">
+                    <Input id="edit-bearer-secret" type="password" autoComplete="off" value={draft.bearerSecret} onChange={(event) => updateDraft("bearerSecret", event.target.value)} aria-invalid={Boolean(draftErrors.bearerSecret)} aria-describedby={draftErrors.bearerSecret ? "edit-bearer-secret-error" : "edit-bearer-secret-help"} className="min-h-11 rounded-control border-2 border-ink bg-cream px-4" placeholder="Bearer token" />
+                    <FieldDescription id="edit-bearer-secret-help">
+                      {endpoint.upstreamAuthType === "BEARER"
+                        ? "Bearer token configured. Leave blank to keep existing token."
+                        : "Sent as an Authorization: Bearer header. Never shown after saving."}
+                    </FieldDescription>
+                    {draftErrors.bearerSecret && <FieldError id="edit-bearer-secret-error">{draftErrors.bearerSecret}</FieldError>}
+                  </div>
+                )}
+
+                {draft?.authType === "apiKey" && (
+                  <div className="mt-4 grid w-full gap-4">
+                    <div>
+                      <Input id="edit-api-header-name" value={draft.apiHeaderName} onChange={(event) => updateDraft("apiHeaderName", event.target.value)} aria-invalid={Boolean(draftErrors.apiHeaderName)} aria-describedby={draftErrors.apiHeaderName ? "edit-api-header-name-error" : "edit-api-header-name-help"} className="min-h-11 rounded-control border-2 border-ink bg-cream px-4" placeholder="X-API-Key" />
+                      <FieldDescription id="edit-api-header-name-help">Protocol-reserved names like Host, Cookie, and PAYMENT-REQUIRED are blocked.</FieldDescription>
+                      {draftErrors.apiHeaderName && <FieldError id="edit-api-header-name-error">{draftErrors.apiHeaderName}</FieldError>}
+                    </div>
+                    <div>
+                      <Input id="edit-api-secret" type="password" autoComplete="off" value={draft.apiSecret} onChange={(event) => updateDraft("apiSecret", event.target.value)} aria-invalid={Boolean(draftErrors.apiSecret)} aria-describedby={draftErrors.apiSecret ? "edit-api-secret-error" : "edit-api-secret-help"} className="min-h-11 rounded-control border-2 border-ink bg-cream px-4" placeholder="API key value" />
+                      <FieldDescription id="edit-api-secret-help">
+                        {endpoint.upstreamAuthType === "API_KEY"
+                          ? "API key configured. Leave blank to keep existing key."
+                          : "Sent in your custom header. Never shown after saving."}
+                      </FieldDescription>
+                      {draftErrors.apiSecret && <FieldError id="edit-api-secret-error">{draftErrors.apiSecret}</FieldError>}
+                    </div>
+                  </div>
+                )}
+
+                {draft?.authType !== "none" && (
+                  <FieldDescription className="mt-3 flex items-center gap-1.5">
+                    <ShieldCheck className="size-4" aria-hidden="true" />
+                    Stored encrypted and only used by Metron when forwarding calls.
+                  </FieldDescription>
+                )}
               </Field>
             </FieldGroup>
             <Button type="submit" disabled={updateMutation.isPending} className="min-h-11 w-fit rounded-pill border-2 border-ink bg-lime px-5 font-bold text-ink hover:bg-lime-hover">
