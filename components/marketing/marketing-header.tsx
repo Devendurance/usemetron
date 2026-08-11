@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { Menu } from "lucide-react"
 
-import { BrandMark } from "@/components/metron"
+import { MetronWordmark } from "@/components/metron"
 import { AuthCta } from "@/components/auth/auth-cta"
 import {
   Sheet,
@@ -31,7 +31,7 @@ function MarketingHeader() {
           aria-label="Metron home"
           className="flex min-h-11 items-center px-4 focus-visible:outline-none focus-visible:shadow-focus"
         >
-          <BrandMark className="[&_[data-slot=brand-mark-name]]:uppercase" />
+          <MetronWordmark />
         </Link>
 
         <Sheet>
@@ -47,7 +47,7 @@ function MarketingHeader() {
           >
             <SheetHeader className="border-b border-border px-6 py-5">
               <SheetTitle>
-                <BrandMark className="[&_[data-slot=brand-mark-name]]:uppercase" />
+                <MetronWordmark />
               </SheetTitle>
               <SheetDescription>Navigate the Metron landing page.</SheetDescription>
             </SheetHeader>
@@ -77,7 +77,10 @@ function MarketingHeader() {
           aria-label="Metron home"
           className="relative flex min-h-[68px] items-center border-r-2 border-ink px-3 min-[1024px]:px-6 focus-visible:z-10 focus-visible:bg-clear-paper focus-visible:outline-2 focus-visible:outline-blueprint focus-visible:outline-offset-[-4px] focus-visible:shadow-focus"
         >
-          <BrandMark className="[&_[data-slot=brand-mark-name]]:hidden min-[768px]:[&_[data-slot=brand-mark-name]]:inline min-[768px]:[&_[data-slot=brand-mark-name]]:uppercase" />
+          <MetronWordmark
+            compact
+            className="min-[768px]:text-lg min-[768px]:tracking-[-0.055em]"
+          />
         </Link>
         {navigation.map((item) => (
           <Link

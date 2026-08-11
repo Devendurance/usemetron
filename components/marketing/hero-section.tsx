@@ -4,6 +4,7 @@ import { ArrowDown, MousePointer2 } from "lucide-react"
 import { AuthCta } from "@/components/auth/auth-cta"
 
 import { CtaLink } from "./cta-link"
+import { HeroZipperScene } from "./hero-zipper-scene"
 
 function HeroSection() {
   return (
@@ -27,6 +28,8 @@ function HeroSection() {
       >
         <div className="hero-floor-grid absolute -inset-x-[35%] -top-[28%] h-[180%] origin-top" />
       </div>
+
+      <HeroZipperScene />
 
       <div className="relative z-10 w-full max-w-[760px] rounded-card border-2 border-ink bg-cream px-5 py-8 text-center shadow-[8px_10px_0_#141414] min-[440px]:px-8 min-[600px]:px-12 min-[600px]:py-12 lg:px-16 lg:py-14">
         <p className="mb-4 font-metadata text-xs font-bold tracking-[0.12em] text-blueprint uppercase min-[600px]:mb-5">
