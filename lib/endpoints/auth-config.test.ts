@@ -41,7 +41,6 @@ describe("validateUpstreamAuth", () => {
       "Payment-Signature",
       "payment-response",
       "Authorization",
-      "X-API-Key",
       "X-Forwarded-For",
     ]) {
       const result = validateUpstreamAuth({
@@ -55,6 +54,39 @@ describe("validateUpstreamAuth", () => {
 
   it("rejects malformed header names", () => {
     for (const name of ["", "a b", "a\nb", "x".repeat(65), "ヘッダー", "host;evil"]) {
+      const result = validateUpstreamAuth({
+        type: "apiKey",
+        headerName: name,
+        secret: "abc",
+      });
+      expect(result.ok, `should reject header ${JSON.stringify(name)}`).toBe(false);
+    }
+  });
+
+  it("accepts x-api-key as a configurable header (PRD §11 common form)", () => {
+    for (const name of ["x-api-key", "X-API-Key", "X-Api-Key"]) {
+      const result = validateUpstreamAuth({
+        type: "apiKey",
+        headerName: name,
+        secret: "abc",
+      });
+      expect(result.ok, `should accept header ${name}`).toBe(true);
+      if (result.ok) {
+        expect(result.authType).toBe("API_KEY");
+        expect(result.headerName).toBe(name);
+      }
+    }
+  });
+
+  it("still validates x-api-key against the header-name pattern", () => {
+    // Input is trimmed before validation, so these must use characters that
+    // survive trimming and are not in the allowed header-name set.
+    for (const name of [
+      "x-api-\nkey",
+      "x-api-key;evil",
+      "x-api-key_ヘッダー",
+      "x-api-key".repeat(10),
+    ]) {
       const result = validateUpstreamAuth({
         type: "apiKey",
         headerName: name,

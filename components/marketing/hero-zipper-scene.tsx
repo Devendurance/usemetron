@@ -589,7 +589,6 @@ function HeroZipperScene() {
           </span>
         </div>
         <p id="zipper-instruction" className={styles.instruction}>
-          <span className={styles.mouseInstruction}>Scroll over hero</span>
           <span className={styles.touchInstruction}>Drag zipper</span>
         </p>
         <span className={styles.zipperOrigin} data-zipper-origin />
