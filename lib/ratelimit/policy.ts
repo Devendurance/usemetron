@@ -15,7 +15,7 @@ export type RateLimitPolicy = {
 };
 
 /**
- * The three protected surfaces. Values are sensible abuse-protection
+ * The six protected surfaces. Values are sensible abuse-protection
  * defaults; production tuning is tracked in the hardening docs.
  */
 export const RATE_LIMIT_POLICIES = {
@@ -25,6 +25,12 @@ export const RATE_LIMIT_POLICIES = {
   gatewayAnonymous: { scope: "gateway-anonymous", limit: 60, windowSeconds: 60 },
   /** Signed gateway attempts by payment identifier (or IP fallback). */
   gatewaySigned: { scope: "gateway-signed", limit: 30, windowSeconds: 60 },
+  /** OpenAPI spec parsing (session-authenticated) by client IP. */
+  openapiParse: { scope: "openapi-parse", limit: 10, windowSeconds: 60 },
+  /** OpenAPI import publishing (session-authenticated) by client IP. */
+  openapiPublish: { scope: "openapi-publish", limit: 10, windowSeconds: 60 },
+  /** Test-console upstream executions (session-authenticated) by client IP. */
+  endpointTest: { scope: "endpoint-test", limit: 20, windowSeconds: 60 },
 } as const satisfies Record<string, RateLimitPolicy>;
 
 /** Stable human-readable label for a policy, e.g. "authChallenge" -> "auth-challenge". */

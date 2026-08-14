@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import {
   AlertTriangle,
   ArrowLeft,
+  FlaskConical,
   Loader2,
   PenLine,
   Power,
@@ -19,6 +20,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { EmptyState } from "@/components/metron"
 import { CopyButton } from "@/components/metron/copy-button"
 import { StatusBadge } from "@/components/metron/status-badge"
+import { UpstreamTestConsole } from "@/components/dashboard/upstream-test-console"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
@@ -613,6 +615,19 @@ function EndpointDetail({ id }: { id: string }) {
             </div>
           </dl>
         )}
+      </section>
+
+      <section className="relative rounded-mobile-card border-2 border-ink bg-mobile-surface p-5 pt-7 shadow-[6px_6px_0_#141414] before:absolute before:-top-3 before:left-5 before:h-3 before:w-20 before:rounded-t-md before:border-x-2 before:border-t-2 before:border-ink before:bg-mobile-purple min-[600px]:rounded-card min-[600px]:border-0 min-[600px]:bg-clear-paper min-[600px]:p-8 min-[600px]:shadow-none min-[600px]:before:hidden">
+        <div className="flex items-start gap-4">
+          <span className="flex size-11 shrink-0 items-center justify-center rounded-control bg-coral" aria-hidden="true">
+            <FlaskConical className="size-5" />
+          </span>
+          <div>
+            <h2 className="font-heading text-xl font-semibold tracking-[-0.02em]">Test upstream</h2>
+            <p className="mt-1 text-sm leading-relaxed text-muted-ink">Send one live request through the hardened gateway using this route&apos;s stored credential. Nothing is charged and nothing is settled.</p>
+          </div>
+        </div>
+        <UpstreamTestConsole className="mt-6" mode="existing" endpointId={id} />
       </section>
 
       <RecentPaidCalls id={id} />

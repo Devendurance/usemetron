@@ -3,16 +3,22 @@ import { describe, expect, it } from "vitest";
 import { RATE_LIMIT_POLICIES, keyFor, scopeLabel } from "./policy";
 
 describe("RATE_LIMIT_POLICIES", () => {
-  it("centralizes exactly the three protected surfaces", () => {
+  it("centralizes exactly the six protected surfaces", () => {
     expect(Object.keys(RATE_LIMIT_POLICIES)).toEqual([
       "authChallenge",
       "gatewayAnonymous",
       "gatewaySigned",
+      "openapiParse",
+      "openapiPublish",
+      "endpointTest",
     ]);
     expect(Object.values(RATE_LIMIT_POLICIES).map((p) => p.scope)).toEqual([
       "auth-challenge",
       "gateway-anonymous",
       "gateway-signed",
+      "openapi-parse",
+      "openapi-publish",
+      "endpoint-test",
     ]);
   });
 
@@ -41,5 +47,8 @@ describe("scopeLabel", () => {
     expect(scopeLabel("authChallenge")).toBe("auth-challenge");
     expect(scopeLabel("gatewayAnonymous")).toBe("gateway-anonymous");
     expect(scopeLabel("gatewaySigned")).toBe("gateway-signed");
+    expect(scopeLabel("openapiParse")).toBe("openapi-parse");
+    expect(scopeLabel("openapiPublish")).toBe("openapi-publish");
+    expect(scopeLabel("endpointTest")).toBe("endpoint-test");
   });
 });

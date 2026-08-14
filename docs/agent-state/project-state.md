@@ -61,9 +61,17 @@ creator SIWE auth (RainbowKit + server SIWE + Redis nonce + opaque HttpOnly sess
 → PAYMENT-RESPONSE + protected upstream body delivered (X-METRON-RECEIPT-ID header)
 ```
 
-Safety switches (server-side env gates, both currently FALSE):
+Safety switches (server-side env gates — semantics below; CURRENT `.env` STATE is
+`X402_SETTLEMENT_ENABLED=true`, `PAYOUTS_ENABLED=true` — a USER-MANAGED DEVIATION from the
+required production state of `false`/`false`, recorded in `left-off.md`; do NOT touch .env):
 - `X402_SETTLEMENT_ENABLED` — without `true`/`1`, settlement returns `501 SETTLEMENT_DISABLED` before any /settle call.
 - `PAYOUTS_ENABLED` — without `true`/`1`, the gateway's automatic exact-earning payout handoff short-circuits (`skipped/disabled`) before any reserve/signer/transaction work. There is no manual payout endpoint (POST /api/payouts was removed in M10).
+
+V1.5A additions — OpenAPI import + Creator Test Console (no payment architecture changes):
+- `POST /api/openapi/parse` (session auth; 1 MiB bound checked before parsing; OpenAPI 3.0.x/3.1.x only; external `$ref`s rejected; `@readme/openapi-parser` validation with external resolution disabled; IP-scoped rate limit 10/60). The spec is never persisted and never echoed — only the normalized operation model returns. Pure, injectable core in `lib/openapi/*` (no network, no code execution).
+- `POST /api/openapi/publish` (session auth; ≤ 50 ops/batch; sequential creates through the EXISTING `endpointService.create` — ownership, slug generation, AES-256-GCM secret encryption, SSRF checks, powered URL all inherited; partial-failure semantics: always HTTP 200 + `{results}`, per-operation machine codes; IP-scoped rate limit 10/60). NO server idempotency key in V1.5A — two identical publishes create two routes (documented limitation; the client uses an in-flight guard and retry-failed-only).
+- Split-route model — NO schema change, no migration: each imported operation publishes a normal route whose `upstreamUrl` = effective server base (OpenAPI precedence: operation `servers` → path `servers` → root `servers`) + the operation path. Operations with path params carry a `callerPathTemplate` shown as the documented caller path appended to the powered URL; callers substitute values there and the gateway forwards the segments.
+- Creator Test Console — `POST /api/endpoints/test` (session auth; IP-scoped rate limit 20/60), shared `components/dashboard/upstream-test-console.tsx` embedded in the publish form (draft mode), the import configure step (draft mode), and the endpoint detail (existing mode). It executes ONE live request through the SAME hardened upstream path the paid gateway uses (runtime SSRF revalidation + DNS pin, decrypt, header filtering + creator-auth injection after filtering, compression normalization, 1 MiB in / 5 MiB out / 30 s, redirects never followed) — it is never a weaker parallel client. **Money safety: plain HTTPS GET/POST to the creator-configured public upstream ONLY — no x402 challenge, no /verify, no /settle, no payout, no ledger, no blockchain activity, zero financial side effects.** Transient draft secrets are encrypted → decrypted server-side → auto-registered with the log redactor, never persisted; response previews redact any value containing the active secret (echo upstreams included); stored credentials are decrypted server-side only and never disclosed to the caller.
 
 ## Database (Supabase Postgres, drizzle)
 
@@ -89,7 +97,7 @@ Migration: single canonical `drizzle/0000_loving_thundra.sql` (log already appli
 - Boundaries: caller body ≤ 1 MiB, upstream response ≤ 5 MiB, upstream timeout 30 s, header allowlist + deny list, creator auth injected after filtering.
 - Response integrity: `accept-encoding: identity` pinned upstream (caller `accept-encoding` removed from the forward allowlist); a compressed upstream reply (gzip/x-gzip/deflate/br) is decoded server-side with the same 5 MiB cap applied to the DECODED size (compression-bomb safe); undecodable bodies fail closed (`UPSTREAM_RESPONSE_DECODE_FAILED`) and are never delivered. The delivered header set is exactly `DELIVERABLE_HEADERS` + `PAYMENT-RESPONSE` + `X-METRON-RECEIPT-ID`; hop-by-hop and cookie headers never reach callers.
 - Replay: Postgres `payment_identifier` precheck (any prior state → 409 before /verify) + Redis SET NX + Postgres UNIQUE.
-- Rate limiting (M11): three surfaces — auth-challenge 20/60s, gateway-anonymous 60/60s (both per client IP), gateway-signed 30/60s (per payment identifier, IP fallback). 429 = JSON `{"error":"RATE_LIMITED","retryAfterSeconds":N}` + `retry-after`. Redis counters with bounded TTL; fail-open (`degraded`) on Redis errors — a paid flow is never strangled by a limiter outage. `X-Forwarded-For` is trusted ONLY when `RATE_LIMIT_TRUST_PROXY_HEADER=true` (opt-in; default untrusted).
+- Rate limiting (M11 + V1.5A): six surfaces — auth-challenge 20/60s, gateway-anonymous 60/60s (both per client IP), gateway-signed 30/60s (per payment identifier, IP fallback), and three session-authenticated V1.5A surfaces per client IP — openapi-parse 10/60s, openapi-publish 10/60s, endpoint-test 20/60s. 429 = JSON `{"error":"RATE_LIMITED","retryAfterSeconds":N}` + `retry-after`. Redis counters with bounded TTL; fail-open (`degraded`) on Redis errors — a paid flow is never strangled by a limiter outage. `X-Forwarded-For` is trusted ONLY when `RATE_LIMIT_TRUST_PROXY_HEADER=true` (opt-in; default untrusted).
 - Safe logging (M11): all PRD §23 stages through `lib/observability/logger.ts` — JSON lines, injected secret env values never serialized, values under sensitive keys redacted, URL credentials scrubbed.
 - Env fail-fast (M11): `lib/env.ts` presence+format validation and `lib/env/canonical.ts` canonical Celo Mainnet constant checks — production refuses to boot on missing/invalid/canonical-mismatched config (names only, never values).
 - Settlement: durable PENDING before /settle; ambiguous outcomes stay SETTLED_PENDING; recovery requires strongly-bound onchain evidence (EIP-3009 AuthorizationUsed + same-tx canonical-USDC Transfer + calldata match), fail-closed.
@@ -117,6 +125,7 @@ Migration: single canonical `drizzle/0000_loving_thundra.sql` (log already appli
 - **M10** — Automatic exact-earning payout handoff in the gateway settled branch (gated by `PAYOUTS_ENABLED`; payout outcome never affects caller delivery; `X-METRON-RECEIPT-ID` on settled responses); manual withdraw removed (no POST /api/payouts, no Withdraw UI); standalone external client `tools/m10-external-client.mjs` (`npm run m10:client`); switches false, manual mainnet E2E evidence recorded below.
 - **M10.1** — Response integrity + evidence: compression never negotiated upstream (`accept-encoding: identity` pinned; caller header removed from the allowlist), bounded gzip/x-gzip/deflate/br decode with fail-safe (`UPSTREAM_RESPONSE_DECODE_FAILED`, 5 MiB decoded cap), receipt "Caller" label fix (static guard tests), external client decodes binary bodies charset-aware, delivery regression tests (`lib/gateway/delivery.test.ts`).
 - **M11** — Production hardening: rate limiting on all three surfaces (20/60 auth-challenge, 60/60 gateway-anonymous, 30/60 gateway-signed; 429 + `retry-after`; bounded TTL; fail-open degraded; opt-in XFF trust via `RATE_LIMIT_TRUST_PROXY_HEADER`), safe logger with secret redaction (all PRD §23 stages), env fail-fast + canonical constants check, SSRF blocklist extensions (CGNAT/benchmarking/multicast/reserved/IPv6 doc ranges + DNS tests), payout wallet lock (Redis, fail-open), and the full acceptance matrix + operator recovery + rate-limit config documented in `docs/production-readiness.md`.
+- **V1.5A** — OpenAPI import + Creator Test Console: pure parse core `lib/openapi/*` (1 MiB bound, 3.0.x/3.1.x gate, external `$ref` rejection, injectable validation, operation discovery with server precedence + SSRF publishability checks, security hints); `POST /api/openapi/parse` (spec never persisted/echoed, machine errors, 10/60 IP limit); `POST /api/openapi/publish` (batch ≤ 50, sequential creates via the existing service, partial-failure results, 10/60 IP limit, no server idempotency key — documented limitation); split-route model with NO schema change (server base + operation path as `upstreamUrl`; operation path as documented caller path for path-param ops); import flow UI at `/dashboard/endpoints/import` (paste → review → configure → results) with per-row test consoles; Creator Test Console `lib/testconsole/*` + `POST /api/endpoints/test` (20/60 IP limit) executing through the SAME hardened upstream path with zero payment side effects — transient draft secrets never persisted + preview redaction, stored credentials never disclosed; three new rate-limit surfaces (openapi-parse 10/60, openapi-publish 10/60, endpoint-test 20/60).
 
 ## Real Mainnet evidence (public)
 
@@ -133,16 +142,14 @@ Financial proof (verified from Celo Mainnet evidence):
 - M10 manual-E2E x402 call: 1000 micro-USDC (0.001 USDC) settled to the treasury; creator earning 1000 micro-USDC; creator payout 1000 micro-USDC (CONFIRMED, attribution verified).
 - Current creator accounting: earned 0.002 / paid 0.002 / outstanding 0 / available 0.
 
-## Current quality state (verified in the latest M11 run)
+## Current quality state (verified in the latest V1.5A run)
 
-- Tests: **576 passing** (55 files)
+- Tests: **778 passing** (68 files)
 - Typecheck: **pass**
-- Lint: **pass** (0 errors; 1 pre-existing warning in `lib/payouts/broadcast.test.ts`, untouched by M11)
-- Build: **pass** (22 routes)
-- `npm run verify:m9`: **pass** (real dashboard evidence matches the milestone)
-- `npm run verify:foundation`: **pass** (exit 0; external `api.x402.celo.org/health` returned HTTP 200 in this run)
+- Lint: **pass** (0 errors; 1 pre-existing warning in `lib/payouts/broadcast.test.ts`, untouched by V1.5A)
+- Build: **pass** (26 routes)
+- `npm run verify:foundation`: **pass** (exit 0; external `api.x402.celo.org/health` returned HTTP 200 in this run; Postgres/Redis probes OK; payout signer matches the registered wallet)
 - `git diff --check`: **clean** (no whitespace issues)
-- `node --check tools/m10-external-client.mjs`: **pass**
-- Read-only real-evidence re-check (M11 Task 5 scratch): M10 settlement `0x821dd6…` SETTLED/upstream 200, payout `0xa89d1196…` CONFIRMED/attributed, earned = paid = 0.002 USDC, outstanding 0, reserved rows 0, switches false — all confirmed, no money moved.
+- Money-safety re-check (V1.5A Task 7): the test console issues plain HTTPS GET/POST through the SSRF-safe upstream service only — `lib/testconsole/core.ts` and `POST /api/endpoints/test` contain no x402 //verify//settle/payout/ledger/blockchain path; no money moved; earned = paid = 0.002 USDC, outstanding 0.
 
-Switches: `X402_SETTLEMENT_ENABLED=false`, `PAYOUTS_ENABLED=false` (expected state).
+Switches: `.env` currently has `X402_SETTLEMENT_ENABLED=true`, `PAYOUTS_ENABLED=true`, `RATE_LIMIT_TRUST_PROXY_HEADER=true` — a USER-MANAGED deviation from the required production state (false/false/off). Left exactly as the user set them; the required state before any funded deployment is false/false/off.
