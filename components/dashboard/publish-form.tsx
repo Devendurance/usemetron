@@ -1,10 +1,11 @@
 "use client"
 
-import { AlertCircle, Loader2, Send, ShieldCheck } from "lucide-react"
+import { AlertCircle, FlaskConical, Loader2, Send, ShieldCheck } from "lucide-react"
 import { FormEvent, useState } from "react"
 import { useMutation } from "@tanstack/react-query"
 import { useRouter } from "next/navigation"
 
+import { UpstreamTestConsole } from "@/components/dashboard/upstream-test-console"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
@@ -49,6 +50,7 @@ function PublishForm() {
   const [authType, setAuthType] = useState<AuthType>("none")
   const [errors, setErrors] = useState<FormErrors>({})
   const [serverMessage, setServerMessage] = useState<string | null>(null)
+  const [testing, setTesting] = useState(false)
 
   function update(field: keyof FormValues, value: string) {
     setValues((current) => ({ ...current, [field]: value }))
@@ -65,6 +67,25 @@ function PublishForm() {
       apiSecret: undefined,
     }))
     setServerMessage(null)
+  }
+
+  /**
+   * Snapshot accessor for the test console: reads the CURRENT form state so
+   * the console always tests what the creator is about to publish. The auth
+   * object is forwarded untouched — the console never renders it.
+   */
+  function draftForTest(): { upstreamUrl: string; auth: EndpointAuthInput } {
+    let auth: EndpointAuthInput = { type: "none" }
+    if (authType === "bearer") {
+      auth = { type: "bearer", secret: values.bearerSecret }
+    } else if (authType === "apiKey") {
+      auth = {
+        type: "apiKey",
+        headerName: values.apiHeaderName,
+        secret: values.apiSecret,
+      }
+    }
+    return { upstreamUrl: values.upstreamUrl, auth }
   }
 
   function validate(): FormErrors {
@@ -226,6 +247,20 @@ function PublishForm() {
           {authType !== "none" && <FieldDescription className="mt-3 flex items-center gap-1.5"><ShieldCheck className="size-4" aria-hidden="true" />Stored encrypted and only used by Metron when forwarding calls.</FieldDescription>}
         </Field>
       </FieldGroup>
+
+      <div className="space-y-3">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setTesting((current) => !current)}
+          aria-expanded={testing}
+          className="min-h-11 rounded-pill border-2 border-ink bg-clear-paper px-5 font-bold text-ink hover:bg-cream"
+        >
+          <FlaskConical className="size-4" aria-hidden="true" />
+          {testing ? "Hide test console" : "Test upstream"}
+        </Button>
+        {testing && <UpstreamTestConsole mode="draft" draft={draftForTest} />}
+      </div>
 
       <Button type="submit" disabled={mutation.isPending} className="min-h-12 w-full rounded-pill border-2 border-ink bg-lime px-6 font-bold text-ink hover:bg-lime-hover sm:w-fit">
         {mutation.isPending ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <Send className="size-4" aria-hidden="true" />}

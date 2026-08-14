@@ -197,7 +197,7 @@ your-secret-api-key
 
 The secret is encrypted before persistence and is never returned through the normal endpoint APIs after saving.
 
-[Publish an endpoint](docs/images/readme/02-publish-endpoint.png)
+![Publish an endpoint](docs/images/readme/02-publish-endpoint.png)
 
 ---
 
@@ -215,7 +215,7 @@ You keep operating your original upstream API.
 
 Metron operates the paid route in front of it.
 
-[Metron Powered URL](docs/images/readme/03-powered-endpoint.png)
+![Metron Powered URL](docs/images/readme/03-powered-endpoint.png)
 
 ---
 
@@ -290,7 +290,7 @@ Transaction:
 
 [`0x821dd6c12157f03aae18948c89a4c7046cd609eb136d52ddad64c57195b54a3a`](https://celo.blockscout.com/tx/0x821dd6c12157f03aae18948c89a4c7046cd609eb136d52ddad64c57195b54a3a)
 
-[Real settled Metron call](docs/images/readme/04-settled-call.png)
+![Real settled Metron call](docs/images/readme/04-settled-call.png)
 
 ## Automatic creator payout
 
@@ -302,7 +302,7 @@ Transaction:
 
 [`0xa89d119600bfe366aeff364926546c626d6d04cbf08f347f4c13a4290b00a269`](https://celo.blockscout.com/tx/0xa89d119600bfe366aeff364926546c626d6d04cbf08f347f4c13a4290b00a269)
 
-[Confirmed creator payout](docs/images/readme/05-creator-payout.png)
+![Confirmed creator payout](docs/images/readme/05-creator-payout.png)
 
 These are two different transactions because Metron deliberately separates:
 
@@ -328,7 +328,7 @@ The Overview shows:
 * payout history.
 
 
-[Metron creator dashboard](docs/images/readme/01-metron-dashboard.png)
+![Metron creator dashboard](docs/images/readme/01-metron-dashboard.png)
 
 Each paid-call receipt can show:
 

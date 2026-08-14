@@ -61,24 +61,40 @@ Hard rules:
 
 Protected surfaces and default policies (source of truth: `lib/ratelimit/policy.ts`):
 
-| Surface | Scope | Limit | Window |
-|---|---|---|---|
-| Auth challenge (per client IP) | `auth-challenge` | 20 | 60 s |
-| Anonymous gateway — unpaid 402 traffic (per client IP) | `gateway-anonymous` | 60 | 60 s |
-| Signed gateway attempts (per payment identifier, IP fallback) | `gateway-signed` | 30 | 60 s |
+| Surface | Scope | Limit | Window | Auth |
+|---|---|---|---|---|
+| Auth challenge (per client IP) | `auth-challenge` | 20 | 60 s | anonymous |
+| Anonymous gateway — unpaid 402 traffic (per client IP) | `gateway-anonymous` | 60 | 60 s | anonymous |
+| Signed gateway attempts (per payment identifier, IP fallback) | `gateway-signed` | 30 | 60 s | signed |
+| OpenAPI spec parsing (per client IP) | `openapi-parse` | 10 | 60 s | session |
+| OpenAPI import publishing (per client IP) | `openapi-publish` | 10 | 60 s | session |
+| Test-console upstream executions (per client IP) | `endpoint-test` | 20 | 60 s | session |
 
-- **429 shape** (both routes): HTTP 429 with JSON `{"error":"RATE_LIMITED","retryAfterSeconds":<window>}` and a `retry-after` header. Machine-readable and consistent with the rest of the gateway.
+- **429 shape** (all surfaces): HTTP 429 with JSON `{"error":"RATE_LIMITED","retryAfterSeconds":<window>}` and a `retry-after` header. Machine-readable and consistent with the rest of the gateway.
 - **Trust flag:** `RATE_LIMIT_TRUST_PROXY_HEADER=true` (only `"true"`/`"1"`, case-insensitive) enables trusting `X-Forwarded-For` (first entry). Default off — with the flag off every request shares a single `"untrusted"` bucket per scope (a global shared bucket; the header is never consulted, so there is no per-IP limiting at all); per-IP limiting requires `RATE_LIMIT_TRUST_PROXY_HEADER=true` behind a proxy that strips client-supplied values (tests: `lib/ratelimit/client-ip.test.ts`).
-- **Fail-open (degraded) behavior:** when Redis `INCR`/`EXPIRE` throws or returns a failure, the limiter allows the request with `degraded: true` (logged as `rate_limit_degraded`). Rationale: a paid (signed) flow must never be strangled by a limiter outage; the cost is a temporary loss of abuse protection. The challenge endpoint has the same fail-open behavior.
+- **Fail-open (degraded) behavior:** when Redis `INCR`/`EXPIRE` throws or returns a failure, the limiter allows the request with `degraded: true` (logged as `rate_limit_degraded`). Rationale: a paid (signed) flow must never be strangled by a limiter outage; the cost is a temporary loss of abuse protection. The challenge endpoint and the three V1.5A surfaces have the same fail-open behavior.
 - **Bounded keys:** counters carry a TTL equal to the window set exactly at counter start; `EXPIRE` failure there is retried once and falls back to DEL (window reset) with a degraded verdict (see §2 item 3).
 - **Signed-bucket coverage:** a payer who re-signs fresh authorizations mints a new payment identifier per attempt, so the 30/60 signed bucket bounds replay-of-the-same-signature (the actual DoS) but not keyed adversaries.
 
 ## 5. M11 hardening summary (what changed)
 
-- Rate limiting on all three surfaces (above), fail-open degraded mode, opt-in XFF trust.
+- Rate limiting on the three M11 surfaces (extended to six in V1.5A — see §4), fail-open degraded mode, opt-in XFF trust.
 - Safe logger (`lib/observability/logger.ts`) covering all PRD §23 stages with secret redaction (env values never serialized, values under sensitive keys redacted, URL credentials scrubbed).
 - Env fail-fast (`lib/env.ts` + `lib/env/canonical.ts`): required-variable presence and format checks; canonical Celo Mainnet constants mismatch detection; secrets by name only.
 - SSRF validation extended (CGNAT 100.64/10, benchmarking 198.18/15, multicast, reserved, IPv6 multicast/doc ranges) + DNS-resolution tests.
 - Payout wallet lock (Redis, fail-open) for nonce-safe serialized broadcasts.
 - Re-verified read-only: M10 settlement/payout records and accounting (earned = paid = 0.002 USDC, outstanding 0, switches false).
 - Upstream auth E2E-verified against the live CoinMarketCap upstream (`CMC_API_KEY=<...> npm run verify:upstream:live`; operator-env-only — the key is never committed or printed).
+
+## 6. V1.5A notes (OpenAPI import + Creator Test Console)
+
+**Money-safety statement:** the Creator Test Console (`POST /api/endpoints/test`) issues plain HTTPS GET/POST requests to creator-configured public upstreams through the SSRF-safe upstream service (`upstreamService.executeUpstream` — runtime SSRF revalidation + DNS pin, header filtering + creator-auth injection, compression normalization, 1 MiB in / 5 MiB out / 30 s, redirects never followed). It contains NO payment path: no x402 challenge, no /verify, no /settle, no payout, no ledger entry, no signer, no blockchain activity — zero financial side effects by construction. It never bypasses the SSRF/bounds of the paid path because it IS the same hardened execution path, with a fixed informational route identity.
+
+Other deployment-relevant V1.5A facts:
+
+- **Both new APIs are session-authenticated** (SIWE dashboard session required); anonymous traffic cannot reach them.
+- **Spec handling:** `POST /api/openapi/parse` accepts a single self-contained OpenAPI 3.0.x/3.1.x document up to 1 MiB; external `$ref`s are rejected; the spec is never persisted, logged, or echoed — only the normalized operation model returns. Raw parser internals never reach clients (machine error codes only).
+- **Import publish reuses the existing create path** (ownership, slug generation, AES-256-GCM encryption, SSRF validation, powered URL) — no duplicated logic, no schema change. Batch limit 50 operations/request; per-operation failures are isolated (HTTP 200 + `{results}` with machine codes).
+- **Known limitation (documented): no server idempotency key on publish.** Two identical publishes create two routes; the client mitigates with an in-flight guard and retry-failed-only. A server-side key is deferred.
+- **Test-secret hygiene:** draft test secrets are encrypted in transit to the API, decrypted server-side, auto-registered with the log redactor (M11.1 `onDecrypt` wiring), and never persisted; response previews are redacted server-side (any value containing the active secret becomes `[REDACTED]` — echo upstreams included) and capped at 64 KiB. Stored credentials are decrypted server-side only and never disclosed.
+- **HTTP upstreams:** the test console inherits the production restriction — plain `http://` upstreams are rejected in production (`NODE_ENV === "production"`), matching the publish path.
